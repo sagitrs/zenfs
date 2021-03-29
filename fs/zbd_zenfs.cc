@@ -485,6 +485,7 @@ ZonedBlockDevice::~ZonedBlockDevice() {
 }
 
 #define LIFETIME_DIFF_NOT_GOOD (100)
+#define LIFETIME_DIFF_MEH (2)
 
 unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLifeTimeHint file_lifetime) {
   assert(file_lifetime >= 0 && file_lifetime <= Env::WLTH_EXTREME);
@@ -497,8 +498,10 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLif
     }
   }
 
-  if (zone_lifetime > file_lifetime) return zone_lifetime - file_lifetime;
+  if (zone_lifetime == file_lifetime)
+    return LIFETIME_DIFF_MEH;
 
+  if (zone_lifetime > file_lifetime) return zone_lifetime - file_lifetime;
   return LIFETIME_DIFF_NOT_GOOD;
 }
 
