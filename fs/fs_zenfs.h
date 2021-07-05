@@ -347,6 +347,8 @@ class ZenFS : public FileSystemWrapper {
   }
 
   std::vector<ZoneStat> GetStat();
+
+  ZonedBlockDevice* GetZonedBlockDevice() { return zbd_; }
 };
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 
