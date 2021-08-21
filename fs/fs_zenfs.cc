@@ -1080,7 +1080,6 @@ std::vector<ZoneStat> ZenFS::GetStat() {
   return stat;
 };
 
-#ifndef NDEBUG
 static std::string GetLogFilename(std::string bdev) {
   std::ostringstream ss;
   time_t t = time(0);
@@ -1092,23 +1091,20 @@ static std::string GetLogFilename(std::string bdev) {
 
   return ss.str();
 }
-#endif
 
 Status NewZenFS(FileSystem** fs, const std::string& bdevname) {
   std::shared_ptr<Logger> logger;
   Status s;
 
-#ifndef NDEBUG
   s = Env::Default()->NewLogger(GetLogFilename(bdevname), &logger);
   if (!s.ok()) {
     fprintf(stderr, "ZenFS: Could not create logger");
   } else {
     logger->SetInfoLogLevel(DEBUG_LEVEL);
   }
-#endif
-
-  ZonedBlockDevice* zbd = new ZonedBlockDevice(bdevname, logger);
-  IOStatus zbd_status = zbd->Open();
+  ZonedBlockDevice* zbd = new ZonedBlockDevice(
+      bdevname, logger, bytedance_tags_, metrics_reporter_factory_);
+	IOStatus zbd_status = zbd->Open();
   if (!zbd_status.ok()) {
     Error(logger, "Failed to open zoned block device: %s",
           zbd_status.ToString().c_str());
