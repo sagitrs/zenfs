@@ -36,6 +36,9 @@
 #define KB (1024)
 #define MB (1024 * KB)
 
+#define ZENFS_DEBUG
+#include "utils.h"
+
 /* Number of reserved zones for metadata
  * Two non-offline meta zones are needed to be able
  * to roll the metadata log safely. One extra
@@ -559,6 +562,8 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
   LatencyHistGuard guard(&io_alloc_latency_reporter_);
   io_alloc_qps_reporter_.AddCount(1);
 
+  auto t0 = std::chrono::system_clock::now();
+
   // For general data, we need both two locks, so the general data thread
   // can give up lock to WAL thread.
   if (!is_wal) {
@@ -585,6 +590,8 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
   if (is_wal) wal_zone_allocating_--;
 
   LatencyHistGuard guard_actual(&io_alloc_actual_latency_reporter_);
+
+  auto t1 = std::chrono::system_clock::now();
 
   /* Reset any unused zones and finish used zones under capacity treshold*/
   for (int i = 0; !is_wal && i < io_zones.size(); i++) {
@@ -657,6 +664,8 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
     }
   }
 
+  auto t2 = std::chrono::system_clock::now();
+
   // If we did not find a good match, allocate an empty one
   if (best_diff >= LIFETIME_DIFF_NOT_GOOD) {
     // TODO(guokuankuan) We should find a better way to sacrifice zone victim.
@@ -703,8 +712,16 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
     io_zones_mtx.unlock();
   }
 
+  auto t5 = std::chrono::system_clock::now();
+
   open_zones_reporter_.AddRecord(open_io_zones_);
   active_zones_reporter_.AddRecord(active_io_zones_);
+
+  std::stringstream ss;
+  ss << " is_wal = " << is_wal << " a/o zones " << active_io_zones_.load() << "," << open_io_zones_.load()
+     << " lock wait: " << TimeDiff(t0, t1) << ", reset: " << TimeDiff(t1, t2) << ", other: " << TimeDiff(t2, t5)
+     << ", wal_alloc: " << wal_zone_allocating_.load() << "\n";
+  Info(logger_, "%s", ss.str().c_str());
 
   return allocated_zone;
 }
