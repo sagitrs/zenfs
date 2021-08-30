@@ -66,6 +66,7 @@ void Zone::CloseWR() {
   assert(open_for_write_);
   open_for_write_ = false;
 
+  std::lock_guard<std::mutex> lock(zbd_->zone_resources_mtx_);
   if (Close().ok()) {
     zbd_->NotifyIOZoneClosed();
   }
@@ -95,8 +96,7 @@ IOStatus Zone::Reset() {
   ret = zbd_reset_zones(zbd_->GetWriteFD(), start_, zone_sz);
   if (ret) return IOStatus::IOError("Zone reset failed\n");
 
-  ret = zbd_report_zones(zbd_->GetReadFD(), start_, zone_sz, ZBD_RO_ALL, &z,
-                         &report);
+  ret = zbd_report_zones(zbd_->GetReadFD(), start_, zone_sz, ZBD_RO_ALL, &z, &report);
 
   if (ret || (report != 1)) return IOStatus::IOError("Zone report failed\n");
 
@@ -148,8 +148,7 @@ IOStatus Zone::Append(char *data, uint32_t size) {
   int fd = zbd_->GetWriteFD();
   int ret;
 
-  if (capacity_ < size)
-    return IOStatus::NoSpace("Not enough capacity for append");
+  if (capacity_ < size) return IOStatus::NoSpace("Not enough capacity for append");
 
   assert((size % zbd_->GetBlockSize()) == 0);
 
@@ -187,10 +186,8 @@ std::vector<ZoneStat> ZonedBlockDevice::GetStat() {
   return stat;
 }
 
-ZonedBlockDevice::ZonedBlockDevice(std::string bdevname,
-                                   std::shared_ptr<Logger> logger)
-    : ZonedBlockDevice(bdevname, logger, "",
-                       std::make_shared<ByteDanceMetricsReporterFactory>()) {}
+ZonedBlockDevice::ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger)
+    : ZonedBlockDevice(bdevname, logger, "", std::make_shared<ByteDanceMetricsReporterFactory>()) {}
 
 static std::string write_latency_metric_name = "zenfs_write_latency";
 static std::string read_latency_metric_name = "zenfs_read_latency";
@@ -213,10 +210,8 @@ static std::string roll_throughput_metric_name = "zenfs_roll_throughput";
 static std::string active_zones_metric_name = "zenfs_active_zones";
 static std::string open_zones_metric_name = "zenfs_open_zones";
 
-ZonedBlockDevice::ZonedBlockDevice(
-    std::string bdevname, std::shared_ptr<Logger> logger,
-    std::string bytedance_tags,
-    std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory)
+ZonedBlockDevice::ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger, std::string bytedance_tags,
+                                   std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory)
     : filename_("/dev/" + bdevname),
       logger_(logger),
       metrics_reporter_factory_(metrics_reporter_factory),
@@ -224,12 +219,12 @@ ZonedBlockDevice::ZonedBlockDevice(
       // and pass the stored `bytedance_tags_` to the reporters. Otherwise the metrics
       // library will panic with `std::logic_error`.
       bytedance_tags_(bytedance_tags),
-      write_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
-          write_latency_metric_name, bytedance_tags_, logger.get())),
-      read_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
-          read_latency_metric_name, bytedance_tags_, logger.get())),
-      sync_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
-          sync_latency_metric_name, bytedance_tags_, logger.get())),
+      write_latency_reporter_(
+          *metrics_reporter_factory_->BuildHistReporter(write_latency_metric_name, bytedance_tags_, logger.get())),
+      read_latency_reporter_(
+          *metrics_reporter_factory_->BuildHistReporter(read_latency_metric_name, bytedance_tags_, logger.get())),
+      sync_latency_reporter_(
+          *metrics_reporter_factory_->BuildHistReporter(sync_latency_metric_name, bytedance_tags_, logger.get())),
       meta_alloc_latency_reporter_(
           *metrics_reporter_factory_->BuildHistReporter(
               meta_alloc_latency_metric_name, bytedance_tags_, logger.get())),
@@ -285,8 +280,7 @@ IOStatus ZonedBlockDevice::CheckScheduler() {
   getline(f, buf);
   if (buf.find("[mq-deadline]") == std::string::npos) {
     f.close();
-    return IOStatus::InvalidArgument(
-        "Current ZBD scheduler is not mq-deadline, set it to mq-deadline.");
+    return IOStatus::InvalidArgument("Current ZBD scheduler is not mq-deadline, set it to mq-deadline.");
   }
 
   f.close();
@@ -305,14 +299,12 @@ IOStatus ZonedBlockDevice::Open(bool readonly) {
 
   read_f_ = zbd_open(filename_.c_str(), O_RDONLY, &info);
   if (read_f_ < 0) {
-    return IOStatus::InvalidArgument("Failed to open zoned block device: " +
-                                     ErrorToString(errno));
+    return IOStatus::InvalidArgument("Failed to open zoned block device: " + ErrorToString(errno));
   }
 
   read_direct_f_ = zbd_open(filename_.c_str(), O_RDONLY | O_DIRECT, &info);
   if (read_direct_f_ < 0) {
-    return IOStatus::InvalidArgument("Failed to open zoned block device: " +
-                                     ErrorToString(errno));
+    return IOStatus::InvalidArgument("Failed to open zoned block device: " + ErrorToString(errno));
   }
 
   if (readonly) {
@@ -320,8 +312,7 @@ IOStatus ZonedBlockDevice::Open(bool readonly) {
   } else {
     write_f_ = zbd_open(filename_.c_str(), O_WRONLY | O_DIRECT | O_EXCL, &info);
     if (write_f_ < 0) {
-      return IOStatus::InvalidArgument("Failed to open zoned block device: " +
-                                       ErrorToString(errno));
+      return IOStatus::InvalidArgument("Failed to open zoned block device: " + ErrorToString(errno));
     }
   }
 
@@ -330,8 +321,7 @@ IOStatus ZonedBlockDevice::Open(bool readonly) {
   }
 
   if (info.nr_zones < ZENFS_MIN_ZONES) {
-    return IOStatus::NotSupported(
-        "To few zones on zoned block device (32 required)");
+    return IOStatus::NotSupported("To few zones on zoned block device (32 required)");
   }
 
   IOStatus ios = CheckScheduler();
@@ -353,13 +343,12 @@ IOStatus ZonedBlockDevice::Open(bool readonly) {
   else
     max_nr_open_io_zones_ = info.max_nr_open_zones - 1;
 
-  Info(logger_, "Zone block device nr zones: %u max active: %u max open: %u \n",
-       info.nr_zones, info.max_nr_active_zones, info.max_nr_open_zones);
+  Info(logger_, "Zone block device nr zones: %u max active: %u max open: %u \n", info.nr_zones,
+       info.max_nr_active_zones, info.max_nr_open_zones);
 
   addr_space_sz = (uint64_t)nr_zones_ * zone_sz_;
 
-  ret = zbd_list_zones(read_f_, 0, addr_space_sz, ZBD_RO_ALL, &zone_rep,
-                       &reported_zones);
+  ret = zbd_list_zones(read_f_, 0, addr_space_sz, ZBD_RO_ALL, &zone_rep, &reported_zones);
 
   if (ret || reported_zones != nr_zones_) {
     Error(logger_, "Failed to list zones, err: %d", ret);
@@ -387,8 +376,7 @@ IOStatus ZonedBlockDevice::Open(bool readonly) {
       if (!zbd_zone_offline(z)) {
         Zone *newZone = new Zone(this, z);
         io_zones.push_back(newZone);
-        if (zbd_zone_imp_open(z) || zbd_zone_exp_open(z) ||
-            zbd_zone_closed(z)) {
+        if (zbd_zone_imp_open(z) || zbd_zone_exp_open(z) || zbd_zone_closed(z)) {
           active_io_zones_++;
           if (zbd_zone_imp_open(z) || zbd_zone_exp_open(z)) {
             if (!readonly) {
@@ -467,8 +455,7 @@ void ZonedBlockDevice::LogZoneStats() {
        "avg_reclaimable(%%), active(#), active_zones(#), open_zones(#)] %ld "
        "%lu %lu %lu %lu %ld %ld\n",
        time(NULL) - start_time_, used_capacity / MB, reclaimable_capacity / MB,
-       100 * reclaimable_capacity / reclaimables_max_capacity, active,
-       active_io_zones_.load(), open_io_zones_.load());
+       100 * reclaimable_capacity / reclaimables_max_capacity, active, active_io_zones_.load(), open_io_zones_.load());
 
   io_zones_mtx.unlock();
 }
@@ -478,8 +465,7 @@ void ZonedBlockDevice::LogZoneUsage() {
     int64_t used = z->used_capacity_;
 
     if (used > 0) {
-      Debug(logger_, "Zone 0x%lX used capacity: %ld bytes (%ld MB)\n",
-            z->start_, used, used / MB);
+      Debug(logger_, "Zone 0x%lX used capacity: %ld bytes (%ld MB)\n", z->start_, used, used / MB);
     }
   }
 }
@@ -500,12 +486,10 @@ ZonedBlockDevice::~ZonedBlockDevice() {
 
 #define LIFETIME_DIFF_NOT_GOOD (100)
 
-unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime,
-                             Env::WriteLifeTimeHint file_lifetime) {
-  assert(file_lifetime <= Env::WLTH_EXTREME);
+unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLifeTimeHint file_lifetime) {
+  assert(file_lifetime >= 0 && file_lifetime <= Env::WLTH_EXTREME);
 
-  if ((file_lifetime == Env::WLTH_NOT_SET) ||
-      (file_lifetime == Env::WLTH_NONE)) {
+  if ((file_lifetime == Env::WLTH_NOT_SET) || (file_lifetime == Env::WLTH_NONE)) {
     if (file_lifetime == zone_lifetime) {
       return 0;
     } else {
@@ -548,7 +532,7 @@ void ZonedBlockDevice::ResetUnusedIOZones() {
   }
 }
 
-Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime) {
+Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool is_wal, const std::string &fname) {
   Zone *allocated_zone = nullptr;
   Zone *finish_victim = nullptr;
   unsigned int best_diff = LIFETIME_DIFF_NOT_GOOD;
@@ -572,9 +556,26 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime) {
   LatencyHistGuard guard_actual(&io_alloc_actual_latency_reporter_);
 
   /* Reset any unused zones and finish used zones under capacity treshold*/
-  for (const auto z : io_zones) {
-    if (z->open_for_write_ || z->IsEmpty() || (z->IsFull() && z->IsUsed()))
-      continue;
+  for (int i = 0; !is_wal && i < io_zones.size(); i++) {
+    // Unlock wal mutex and give wal thread a chance
+    if (!is_wal && wal_zone_allocating_.load() > 0) {
+      wal_zones_mtx.unlock();
+      while (wal_zone_allocating_.load() > 0) {
+        std::this_thread::yield();
+        // After we get back, we will re-start the loop in case other thread
+        // changes the state of any zone, may need fine grained tuning.
+        i = 0;
+      }
+
+      // Re-acquire resource mutex under target condition
+      std::unique_lock<std::mutex> lk(zone_resources_mtx_);
+      zone_resources_.wait(
+          lk, [this, reserved_zones] { return open_io_zones_.load() < max_nr_open_io_zones_ - reserved_zones; });
+
+      wal_zones_mtx.lock();
+    }
+    const auto z = io_zones[i];
+    if (z->open_for_write_ || z->IsEmpty() || (z->IsFull() && z->IsUsed())) continue;
 
     if (!z->IsUsed()) {
       if (!z->IsFull()) active_io_zones_--;
@@ -585,7 +586,8 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime) {
       continue;
     }
 
-    if ((z->capacity_ < (z->max_capacity_ * finish_threshold_ / 100))) {
+    // Finish a almost FULL zone is costless
+    if (!is_wal && (z->capacity_ < (z->max_capacity_ * finish_threshold_ / 100))) {
       /* If there is less than finish_threshold_% remaining capacity in a
        * non-open-zone, finish the zone */
       s = z->Finish();
@@ -645,10 +647,8 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime) {
     assert(!allocated_zone->open_for_write_);
     allocated_zone->open_for_write_ = true;
     open_io_zones_++;
-    Debug(logger_,
-          "Allocating zone(new=%d) start: 0x%lx wp: 0x%lx lt: %d file lt: %d\n",
-          new_zone, allocated_zone->start_, allocated_zone->wp_,
-          allocated_zone->lifetime_, file_lifetime);
+    Debug(logger_, "Allocating zone(new=%d) start: 0x%lx wp: 0x%lx lt: %d file lt: %d\n", new_zone,
+          allocated_zone->start_, allocated_zone->wp_, allocated_zone->lifetime_, file_lifetime);
   }
 
   io_zones_mtx.unlock();
