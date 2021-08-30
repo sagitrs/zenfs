@@ -352,7 +352,9 @@ class ZenFS : public FileSystemWrapper {
 };
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 
-Status NewZenFS(FileSystem** fs, const std::string& bdevname);
+Status NewZenFS(
+    FileSystem** fs, const std::string& bdevname, std::string bytedance_tags_,
+    std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory_);
 std::map<std::string, std::string> ListZenFileSystems();
 
 }  // namespace ROCKSDB_NAMESPACE

@@ -15,12 +15,14 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <iostream>
 #include <utility>
 #include <vector>
 
 #include "rocksdb/utilities/object_registry.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
+#include "utilities/trace/bytedance_metrics_reporter.h"
 
 #define DEFAULT_ZENV_LOG_PATH "/tmp/"
 
@@ -280,6 +282,8 @@ IOStatus ZenFS::RollMetaZoneLocked() {
   ZenMetaLog* new_meta_log;
   Zone *new_meta_zone, *old_meta_zone;
   IOStatus s;
+  LatencyHistGuard guard(&zbd_->roll_latency_reporter_);
+  zbd_->roll_qps_reporter_.AddCount(1);
 
   new_meta_zone = zbd_->AllocateMetaZone();
   if (!new_meta_zone) {
@@ -315,6 +319,11 @@ IOStatus ZenFS::RollMetaZoneLocked() {
   /* We've rolled successfully, we can reset the old zone now */
   if (s.ok()) old_meta_zone->Reset();
 
+  auto new_meta_zone_size =
+      meta_log_->GetZone()->wp_ - meta_log_->GetZone()->start_;
+  Info(logger_, "Size of new meta zone %ld\n", new_meta_zone_size);
+
+  zbd_->roll_throughput_reporter_.AddCount(new_meta_zone_size);
   return s;
 }
 
@@ -1092,7 +1101,9 @@ static std::string GetLogFilename(std::string bdev) {
   return ss.str();
 }
 
-Status NewZenFS(FileSystem** fs, const std::string& bdevname) {
+Status NewZenFS(
+    FileSystem** fs, const std::string& bdevname, std::string bytedance_tags_,
+    std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory_) {
   std::shared_ptr<Logger> logger;
   Status s;
 
@@ -1182,7 +1193,10 @@ FactoryFunc<FileSystem> zenfs_filesystem_reg =
           devID.replace(0, strlen("zenfs://"), "");
           if (devID.rfind("dev:") == 0) {
             devID.replace(0, strlen("dev:"), "");
-            s = NewZenFS(&fs, devID);
+            s = NewZenFS(&fs, devID, "zenfs-testing",
+                         std::make_shared<ByteDanceMetricsReporterFactory>());
+            std::cerr << "Metrics is not enabled due to using zenfs:// path"
+                      << std::endl;
             if (!s.ok()) {
               *errmsg = s.ToString();
             }
@@ -1194,7 +1208,10 @@ FactoryFunc<FileSystem> zenfs_filesystem_reg =
             if (zenFileSystems.find(devID) == zenFileSystems.end()) {
               *errmsg = "UUID not found";
             } else {
-              s = NewZenFS(&fs, zenFileSystems[devID]);
+              s = NewZenFS(&fs, zenFileSystems[devID], "zenfs-testing",
+                           std::make_shared<ByteDanceMetricsReporterFactory>());
+              std::cerr << "Metrics is not enabled due to using zenfs:// path"
+                        << std::endl;
               if (!s.ok()) {
                 *errmsg = s.ToString();
               }
@@ -1212,7 +1229,10 @@ FactoryFunc<FileSystem> zenfs_filesystem_reg =
 #include "rocksdb/env.h"
 
 namespace ROCKSDB_NAMESPACE {
-Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/) {
+Status NewZenFS(
+    FileSystem** /*fs*/, const std::string& /*bdevname*/,
+    std::string /*bytedance_tags_*/,
+    std::shared_ptr<MetricsReporterFactory> /*metrics_reporter_factory_*/) {
   return Status::NotSupported("Not built with ZenFS support\n");
 }
 std::map<std::string, std::string> ListZenFileSystems() {
