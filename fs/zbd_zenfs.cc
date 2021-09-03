@@ -82,7 +82,6 @@ uint64_t Zone::GetZoneNr() { return start_ / zbd_->GetZoneSize(); }
 void Zone::CloseWR() {
   assert(open_for_write_);
   Sync();
-  open_for_write_ = false;
 
   std::lock_guard<std::mutex> lock(zbd_->zone_resources_mtx_);
   if (Close().ok()) {
