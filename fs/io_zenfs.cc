@@ -205,11 +205,11 @@ ZoneFile::ZoneFile(ZonedBlockDevice* zbd, std::string filename,
       extent_filepos_(0),
       lifetime_(Env::WLTH_NOT_SET),
       fileSize(0),
-      filename_(filename),
       file_id_(file_id),
       nr_synced_extents_(0),
       m_time_(0),
       logger_(logger),
+      filename_(filename),
       is_wal_(false) {
   // Generally, we should let our user to decide whether a file is WAL
   // or not. However, current TerarkDB environment doesn't provide such
@@ -369,7 +369,8 @@ void ZoneFile::PushExtent() {
 }
 
 /* Assumes that data and size are block aligned */
-IOStatus ZoneFile::Append(void* data, int data_size, int valid_size, bool async) {
+IOStatus ZoneFile::Append(void* data, int data_size, int valid_size,
+                          bool async) {
   uint32_t left = data_size;
   uint32_t wr_size, offset = 0;
   IOStatus s;
@@ -377,7 +378,10 @@ IOStatus ZoneFile::Append(void* data, int data_size, int valid_size, bool async)
   if (active_zone_ == NULL) {
     active_zone_ = zbd_->AllocateZone(lifetime_, is_wal_);
     if (!active_zone_) {
-      Warn(logger_, "Zone allocation failure upon append starting, filename=%s, lifetime=%d\n", filename_.c_str(), lifetime_);
+      Warn(logger_,
+           "Zone allocation failure upon append starting, filename=%s, "
+           "lifetime=%d\n",
+           filename_.c_str(), lifetime_);
       return IOStatus::NoSpace("Zone allocation failure\n");
     }
     extent_start_ = active_zone_->wp_;
@@ -391,7 +395,9 @@ IOStatus ZoneFile::Append(void* data, int data_size, int valid_size, bool async)
       active_zone_->CloseWR();
       active_zone_ = zbd_->AllocateZone(lifetime_, is_wal_);
       if (!active_zone_) {
-        Warn(logger_, "Zone allocation failure when appending, filename=%s, left=%d\n", filename_.c_str(), left);
+        Warn(logger_,
+             "Zone allocation failure when appending, filename=%s, left=%d\n",
+             filename_.c_str(), left);
         return IOStatus::NoSpace("Zone allocation failure\n");
       }
       extent_start_ = active_zone_->wp_;
@@ -402,11 +408,11 @@ IOStatus ZoneFile::Append(void* data, int data_size, int valid_size, bool async)
     if (wr_size > active_zone_->capacity_) wr_size = active_zone_->capacity_;
 
     if (async) {
-      s = active_zone_->Append_async((char*)data + offset, wr_size); 
+      s = active_zone_->Append_async((char*)data + offset, wr_size);
       if (!s.ok()) return s;
-    
+
     } else {
-      s = active_zone_->Append((char*)data + offset, wr_size); 
+      s = active_zone_->Append((char*)data + offset, wr_size);
     }
 
     fileSize += wr_size;
@@ -435,6 +441,11 @@ ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
   buffer_pos = 0;
 
   zoneFile_ = zoneFile;
+  // For non-wal files, we uses a larger buffer size to fit rocksdb
+  // bytes_per_sync.
+  if (!zoneFile_->is_wal_) {
+    buffer_sz = block_sz * 256;
+  }
 
   // TODO: add an Open() method so we can handle out of memory gracefully
   if (buffered) {
@@ -446,7 +457,7 @@ ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
     assert(ret == 0);
     (void)ret;
     assert(b1 != nullptr && b2 != nullptr);
-  
+
     buffer = b1;
   }
 
@@ -457,7 +468,7 @@ ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
 IOStatus ZoneFile::Sync() {
   IOStatus s;
   if (active_zone_) {
-     s = active_zone_->Sync();
+    s = active_zone_->Sync();
     if (!s.ok()) return s;
   }
   return s;
@@ -487,16 +498,21 @@ IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
   zoneFile_->GetZbd()->sync_qps_reporter_.AddCount(1);
 
   buffer_mtx_.lock();
+  uint64_t wp0 = wp;
   s = FlushBuffer();
   if (s.ok()) {
     s = zoneFile_->Sync();
   }
   buffer_mtx_.unlock();
-  
+
   if (!s.ok()) return s;
-  
-  zoneFile_->PushExtent();
-  return metadata_writer_->Persist(zoneFile_);
+
+  // RocksDB sync an alread synced file (empty buffer)
+  if (wp0 != wp) {
+    zoneFile_->PushExtent();
+    s = metadata_writer_->Persist(zoneFile_);
+  }
+  return s;
 }
 
 IOStatus ZonedWritableFile::Sync(const IOOptions& options,
@@ -543,8 +559,7 @@ IOStatus ZonedWritableFile::FlushBuffer() {
   }
 
   s = zoneFile_->Sync();
-  if (!s.ok())
-    return s;
+  if (!s.ok()) return s;
 
   if (buffer == b1) {
     buffer = b2;

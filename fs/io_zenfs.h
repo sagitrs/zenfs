@@ -48,14 +48,16 @@ class ZoneFile {
 
   Env::WriteLifeTimeHint lifetime_;
   uint64_t fileSize;
-  std::string filename_;
   uint64_t file_id_;
 
   uint32_t nr_synced_extents_;
   bool open_for_wr_ = false;
   time_t m_time_;
-  
+
   std::shared_ptr<Logger> logger_;
+
+ public:
+  std::string filename_;
   bool is_wal_;
 
  public:
@@ -68,7 +70,8 @@ class ZoneFile {
   void CloseWR();
   bool IsOpenForWR();
 
-  IOStatus Append(void* data, int data_size, int valid_size, bool async = false);
+  IOStatus Append(void* data, int data_size, int valid_size,
+                  bool async = false);
   IOStatus SetWriteLifeTimeHint(Env::WriteLifeTimeHint lifetime);
   IOStatus Sync();
 
@@ -161,9 +164,9 @@ class ZonedWritableFile : public FSWritableFile {
   IOStatus FlushBuffer();
 
   bool buffered;
-  char *buffer;
-  char *b1;
-  char *b2;
+  char* buffer;
+  char* b1;
+  char* b2;
   size_t buffer_sz;
   uint32_t block_sz;
   uint32_t buffer_pos;
