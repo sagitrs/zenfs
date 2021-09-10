@@ -44,7 +44,7 @@
  * to roll the metadata log safely. One extra
  * is allocated to cover for one zone going offline.
  */
-#define ZENFS_META_ZONES (3)
+#define ZENFS_META_ZONES (4)
 
 /* Minimum of number of zones that makes sense */
 #define ZENFS_MIN_ZONES (32)
@@ -602,23 +602,42 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLif
   return LIFETIME_DIFF_NOT_GOOD;
 }
 
-Zone *ZonedBlockDevice::AllocateMetaZone() {
-  LatencyHistGuard guard(&meta_alloc_latency_reporter_);
-  meta_alloc_qps_reporter_.AddCount(1);
+Zone *ZonedBlockDevice::AllocateMetaZone(std::mutex& metadata_reset_mtx, std::condition_variable& metadata_cv) {
 
-  for (const auto z : meta_zones) {
-    /* If the zone is not used, reset and use it */
-    if (!z->IsUsed()) {
-      if (!z->IsEmpty()) {
-        if (!z->Reset().ok()) {
-          Warn(logger_, "Failed resetting zone!");
+  auto getResettedMetaZone = [this, &metadata_reset_mtx, &metadata_cv] () -> Zone* {
+    LatencyHistGuard guard(&meta_alloc_latency_reporter_);
+    meta_alloc_qps_reporter_.AddCount(1);
+
+    for (const auto z : meta_zones) {
+      /* return the first zone that is not used and is empty */
+      if (!z->IsUsed()) {
+        if (!z->IsEmpty()) {
+          /* reset the zone asynchronously if it is not used and not empty.
+           * signal metadata condition variable once reset is finished*/
+          std::thread backgroundTask([z = std::move(z), &metadata_reset_mtx, &metadata_cv] {
+            std::unique_lock<std::mutex> lk(metadata_reset_mtx);
+            z->Reset();
+            metadata_cv.notify_one();
+          });
+          backgroundTask.detach();
+
+          /* continue the for-loop to find next non-used and empty metazone while async reset is happening */
           continue;
         }
+        return z;
       }
-      return z;
     }
-  }
-  return nullptr;
+    return nullptr;
+  };
+
+  Zone* allocated_zone = nullptr;
+  std::unique_lock<std::mutex> lk(metadata_reset_mtx);
+  metadata_cv.wait(lk, [&allocated_zone, getResettedMetaZone]{
+    allocated_zone = getResettedMetaZone();
+    return allocated_zone != nullptr;
+  });
+
+  return allocated_zone;
 }
 
 void ZonedBlockDevice::ResetUnusedIOZones() {
@@ -644,7 +663,7 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
 
   LatencyHistGuard guard_total;
   LatencyHistGuard guard_actual;
-  
+
   auto *reporter_total = is_wal ? &io_alloc_wal_latency_reporter_
           : &io_alloc_non_wal_latency_reporter_;
 

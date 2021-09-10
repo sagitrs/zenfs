@@ -295,7 +295,8 @@ IOStatus ZenFS::RollMetaZoneLocked() {
   LatencyHistGuard guard(&zbd_->roll_latency_reporter_);
   zbd_->roll_qps_reporter_.AddCount(1);
 
-  new_meta_zone = zbd_->AllocateMetaZone();
+  new_meta_zone = zbd_->AllocateMetaZone(metadata_reset_mtx_, metadata_reset_cv_);
+
   if (!new_meta_zone) {
     assert(false);  // TMP
     Error(logger_, "Out of metadata zones, we should go to read only now.");
@@ -312,6 +313,7 @@ IOStatus ZenFS::RollMetaZoneLocked() {
   if (old_meta_zone->GetCapacityLeft()) WriteEndRecord(meta_log_.get());
   if (old_meta_zone->GetCapacityLeft()) old_meta_zone->Finish();
 
+  auto old_meta_log = std::move(meta_log_);
   meta_log_.reset(new_meta_log);
 
   std::string super_string;
@@ -327,7 +329,18 @@ IOStatus ZenFS::RollMetaZoneLocked() {
   s = WriteSnapshotLocked(meta_log_.get());
 
   /* We've rolled successfully, we can reset the old zone now */
-  if (s.ok()) old_meta_zone->Reset();
+  if (s.ok()) {
+    std::thread backgroundTask([old_meta_log = std::move(old_meta_log), this] {
+      auto meta_zone = old_meta_log->GetZone();
+      std::unique_lock<std::mutex> lk(metadata_reset_mtx_);
+      meta_zone->Reset();
+
+      // metazone reset finished, notify the RollMetaZoneLocked() if any
+      metadata_cv_.notify_one();
+    });
+
+    backgroundTask.detach();
+  }
 
   auto new_meta_zone_size =
       meta_log_->GetZone()->wp_ - meta_log_->GetZone()->start_;

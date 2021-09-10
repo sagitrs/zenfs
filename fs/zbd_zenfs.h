@@ -125,7 +125,7 @@ class ZonedBlockDevice {
   Zone *GetIOZone(uint64_t offset);
 
   Zone *AllocateZone(Env::WriteLifeTimeHint lifetime, bool is_wal);
-  Zone *AllocateMetaZone();
+  Zone *AllocateMetaZone(std::mutex& metadata_reset_mtx, std::condition_variable& cv);
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
