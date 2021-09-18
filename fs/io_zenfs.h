@@ -173,6 +173,10 @@ class ZonedWritableFile : public FSWritableFile {
   uint64_t wp;
   int write_temp;
 
+  // RocksDB may close a file multiple times and may sync after a file was
+  // closed.
+  bool closed_ = true;
+
   ZoneFile* zoneFile_;
   MetadataWriter* metadata_writer_;
 

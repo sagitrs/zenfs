@@ -432,6 +432,7 @@ IOStatus ZoneFile::SetWriteLifeTimeHint(Env::WriteLifeTimeHint lifetime) {
 ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
                                      ZoneFile* zoneFile,
                                      MetadataWriter* metadata_writer) {
+  closed_ = false;
   wp = zoneFile->GetFileSize();
   assert(wp == 0);
 
@@ -480,6 +481,7 @@ ZonedWritableFile::~ZonedWritableFile() {
     free(b1);
     free(b2);
   }
+  closed_ = true;
 };
 
 ZonedWritableFile::MetadataWriter::~MetadataWriter() {}
@@ -535,6 +537,7 @@ IOStatus ZonedWritableFile::RangeSync(uint64_t offset, uint64_t nbytes,
 
 IOStatus ZonedWritableFile::Close(const IOOptions& options,
                                   IODebugContext* dbg) {
+  if (closed_) return IOStatus::OK();
   Fsync(options, dbg);
   zoneFile_->CloseWR();
 
