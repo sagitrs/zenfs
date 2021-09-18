@@ -541,6 +541,7 @@ IOStatus ZonedWritableFile::Close(const IOOptions& options,
   Fsync(options, dbg);
   zoneFile_->CloseWR();
 
+  closed_ = true;
   return IOStatus::OK();
 }
 

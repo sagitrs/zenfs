@@ -12,9 +12,10 @@ rm -rf /tmp/zenfs_$DEVICE*
 ./build/zenfs mkfs --zbd=$DEVICE --aux_path=/tmp/zenfs_$DEVICE --force=true
 
 ./build/db_bench \
-        --zbd_path=nvme3n2 \
+        --zbd_path=$DEVICE \
 	--benchmarks=fillrandom \
 	--use_existing_db=0 \
+	--histogram=1 \
 	--statistics=0 \
         --stats_per_interval=1 \
         --stats_interval_seconds=60 \

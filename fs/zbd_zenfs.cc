@@ -150,7 +150,7 @@ IOStatus Zone::Close() {
   int fd = zbd_->GetWriteFD();
   int ret;
 
-  assert(open_for_write_);
+  // assert(open_for_write_);
 
   if (!(IsEmpty() || IsFull())) {
     ret = zbd_close_zones(fd, start_, zone_sz);
