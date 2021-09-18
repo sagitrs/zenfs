@@ -653,42 +653,35 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLif
   return LIFETIME_DIFF_NOT_GOOD;
 }
 
-Zone *ZonedBlockDevice::AllocateMetaZone(std::mutex& metadata_reset_mtx, std::condition_variable& metadata_cv) {
+Zone *ZonedBlockDevice::AllocateMetaZone() {
+  LatencyHistGuard guard(&meta_alloc_latency_reporter_);
+  meta_alloc_qps_reporter_.AddCount(1);
 
-  auto getResettedMetaZone = [this, &metadata_reset_mtx, &metadata_cv] () -> Zone* {
-    LatencyHistGuard guard(&meta_alloc_latency_reporter_);
-    meta_alloc_qps_reporter_.AddCount(1);
-
+  // Wait till there is an empty metazone
+  std::unique_lock<std::mutex> lk(metazone_reset_mtx_);
+  metazone_reset_cv_.wait(lk, [&] {
     for (const auto z : meta_zones) {
-      /* return the first zone that is not used and is empty */
-      if (!z->IsUsed()) {
-        if (!z->IsEmpty()) {
-          /* reset the zone asynchronously if it is not used and not empty.
-           * signal metadata condition variable once reset is finished*/
-          std::thread backgroundTask([z = std::move(z), &metadata_reset_mtx, &metadata_cv] {
-            std::unique_lock<std::mutex> lk(metadata_reset_mtx);
-            z->Reset();
-            metadata_cv.notify_one();
-          });
-          backgroundTask.detach();
-
-          /* continue the for-loop to find next non-used and empty metazone while async reset is happening */
-          continue;
-        }
-        return z;
+      if (!z->IsUsed() && z->IsEmpty()) {
+        return true;
       }
     }
-    return nullptr;
-  };
-
-  Zone* allocated_zone = nullptr;
-  std::unique_lock<std::mutex> lk(metadata_reset_mtx);
-  metadata_cv.wait(lk, [&allocated_zone, getResettedMetaZone]{
-    allocated_zone = getResettedMetaZone();
-    return allocated_zone != nullptr;
   });
 
-  return allocated_zone;
+  // TODO(guokuankuan) we don't have to do the resetting here anymore
+  for (const auto z : meta_zones) {
+    /* If the zone is not used, reset and use it */
+    if (!z->IsUsed()) {
+      if (!z->IsEmpty()) {
+        if (!z->Reset().ok()) {
+          Warn(logger_, "Failed resetting zone!");
+          continue;
+        }
+      }
+      return z;
+    }
+  }
+
+  return nullptr;
 }
 
 void ZonedBlockDevice::ResetUnusedIOZones() {

@@ -9,8 +9,8 @@
 #include "io_zenfs.h"
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
-#include "rocksdb/plugin/zenfs/fs/zbd_stat.h"
 #include "rocksdb/status.h"
+#include "zbd_stat.h"
 #include "zbd_zenfs.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -43,8 +43,8 @@ class Superblock {
   /* Create a superblock for a filesystem covering the entire zoned block device
    */
   Superblock(ZonedBlockDevice* zbd, std::string aux_fs_path,
-             uint32_t finish_threshold,
-             uint32_t max_open_limit, uint32_t max_active_limit) {
+             uint32_t finish_threshold, uint32_t max_open_limit,
+             uint32_t max_active_limit) {
     std::string uuid = Env::Default()->GenerateUniqueId();
     int uuid_len =
         std::min(uuid.length(),
@@ -64,7 +64,7 @@ class Superblock {
     } else {
       max_open_limit_ = max_open_limit;
     }
-    
+
     if (max_active_limit == 0) {
       max_active_limit_ = zbd->GetMaxActiveZones();
     } else {
@@ -127,9 +127,6 @@ class ZenFS : public FileSystemWrapper {
   std::unique_ptr<ZenMetaLog> meta_log_;
   std::mutex metadata_sync_mtx_;
   std::unique_ptr<Superblock> superblock_;
-  std::mutex metadata_reset_mtx_;
-  std::condition_variable metadata_reset_cv_;
-  std::condition_variable metadata_cv_;
 
   std::shared_ptr<Logger> GetLogger() { return logger_; }
 

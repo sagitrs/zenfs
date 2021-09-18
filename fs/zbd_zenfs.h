@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <libaio.h>
+#include <libaio.h>
 #include <libzbd/zbd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +32,7 @@
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
 #include "rocksdb/metrics_reporter.h"
-#include "rocksdb/plugin/zenfs/fs/zbd_stat.h"
+#include "zbd_stat.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -170,6 +171,9 @@ class ZonedBlockDevice {
  public:
   std::mutex zone_resources_mtx_; /* Protects active/open io zones */
 
+  std::mutex metazone_reset_mtx_;
+  std::condition_variable metazone_reset_cv_;
+
  public:
   explicit ZonedBlockDevice(std::string bdevname,
                             std::shared_ptr<Logger> logger);
@@ -186,8 +190,7 @@ class ZonedBlockDevice {
   Zone *GetIOZone(uint64_t offset);
 
   Zone *AllocateZone(Env::WriteLifeTimeHint lifetime, bool is_wal);
-  Zone *AllocateMetaZone(std::mutex &metadata_reset_mtx,
-                         std::condition_variable &cv);
+  Zone *AllocateMetaZone();
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
