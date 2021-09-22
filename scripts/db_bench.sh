@@ -32,7 +32,7 @@ rm -rf /tmp/zenfs_$DEVICE*
 	--threads=1 \
 	--num_levels=7 \
 	--key_size=36 \
-	--value_size=8192 \
+	--value_size=1111 \
 	--level_compaction_dynamic_level_bytes=true \
 	--mmap_read=false \
 	--compression_type=zstd \
