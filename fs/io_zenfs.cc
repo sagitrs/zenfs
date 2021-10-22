@@ -409,11 +409,10 @@ IOStatus ZoneFile::Append(void* data, int data_size, int valid_size,
 
     if (async) {
       s = active_zone_->Append_async((char*)data + offset, wr_size);
-      if (!s.ok()) return s;
-
     } else {
       s = active_zone_->Append((char*)data + offset, wr_size);
     }
+    if (!s.ok()) return s;
 
     fileSize += wr_size;
     left -= wr_size;
@@ -557,7 +556,7 @@ IOStatus ZonedWritableFile::FlushBuffer() {
   if (pad_sz) memset((char*)buffer + buffer_pos, 0x0, pad_sz);
 
   wr_sz = buffer_pos + pad_sz;
-  s = zoneFile_->Append((char*)buffer, wr_sz, buffer_pos, true);
+  s = zoneFile_->Append((char*)buffer, wr_sz, buffer_pos);
   if (!s.ok()) {
     return s;
   }

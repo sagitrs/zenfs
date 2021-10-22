@@ -4,6 +4,8 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 
+#include <cstddef>
+#include <string>
 #if !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 
 #include "fs_zenfs.h"
@@ -115,7 +117,7 @@ IOStatus ZenMetaLog::AddRecord(const Slice& slice) {
   assert((phys_sz % bs_) == 0);
 
   ret = posix_memalign((void**)&buffer, sysconf(_SC_PAGESIZE), phys_sz);
-  if (ret) return IOStatus::IOError("Failed to allocate memory");
+  if (ret != 0) return IOStatus::IOError("Failed to allocate memory");
 
   memset(buffer, 0, phys_sz);
 
@@ -226,10 +228,8 @@ ZenFS::~ZenFS() {
   zbd_->LogZoneUsage();
   LogFiles();
 
-  meta_log_.reset(nullptr);
-#ifdef WITH_ZENFS_ASYNC_METAZONE_ROLLOVER
-  meta_snapshot_log_.reset(nullptr);
-#endif // WITH_ZENFS_ASYNC_METAZONE_ROLLOVER
+  op_log_.reset(nullptr);
+  snapshot_log_.reset(nullptr);
   ClearFiles();
   delete zbd_;
 }
@@ -268,18 +268,55 @@ void ZenFS::ClearFiles() {
 }
 
 /* Assumes that files_mutex_ is held */
-IOStatus ZenFS::WriteSnapshotLocked(ZenMetaLog* meta_log) {
-  IOStatus s;
-  std::string snapshot;
+void ZenFS::WriteSnapshotLocked(std::string* snapshot) {
+  EncodeSnapshotTo(snapshot);
+  for (auto& f : files_)
+    f.second->MetadataSynced();
+}
 
-  EncodeSnapshotTo(&snapshot);
-  s = meta_log->AddRecord(snapshot);
-  if (s.ok()) {
-    for (auto it = files_.begin(); it != files_.end(); it++) {
-      ZoneFile* zoneFile = it->second;
-      zoneFile->MetadataSynced();
-    }
+IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
+  IOStatus s;
+  ZenMetaLog* old_snapshot_log = snapshot_log_.get();
+  Zone *new_snapshot_zone;
+  LatencyHistGuard guard(&zbd_->roll_latency_reporter_);
+  zbd_->roll_qps_reporter_.AddCount(1);
+
+  // get new snapshot zone
+  if ((new_snapshot_zone = zbd_->AllocateSnapshotZone()) == nullptr) {
+    Error(logger_, "Out of snapshot zones, we should go to read only now.");
+    return IOStatus::NoSpace("Out of snapshot log zones");
   }
+
+  Info(logger_, "New snapshot zone : %d\n", (int)new_snapshot_zone->GetZoneNr());
+  
+  // set new snapshot_log_
+  snapshot_log_.reset(new ZenMetaLog(zbd_, new_snapshot_zone));
+
+  // write snapshot to disk
+  std::string super_string;
+  super_block_->EncodeTo(&super_string);
+  s = snapshot_log_->AddRecord(super_string);
+
+  if (!s.ok()) {
+    Error(logger_, "Init new snapshot zone error.");
+    return IOStatus::Corruption("Out of snapshot log zones");
+  }
+
+  s = snapshot_log_->AddRecord(*snapshot);
+
+  if (s.ok()) {
+    /* We've rolled successfully, we can reset the old zone now */
+    old_snapshot_log->GetZone()->Close();
+    old_snapshot_log->GetZone()->Finish();
+    old_snapshot_log->GetZone()->Reset();
+
+    auto new_snapshot_log_zone_size =
+        snapshot_log_->GetZone()->wp_ - snapshot_log_->GetZone()->start_;
+    Info(logger_, "Size of new snapshot log zone %ld\n",
+         new_snapshot_log_zone_size);
+    zbd_->roll_throughput_reporter_.AddCount(new_snapshot_log_zone_size);
+  }
+
   return s;
 }
 
@@ -291,115 +328,93 @@ IOStatus ZenFS::WriteEndRecord(ZenMetaLog* meta_log) {
 }
 
 /* Assumes the files_mtx_ is held */
-IOStatus ZenFS::RollMetaZone() {
-#ifdef WITH_ZENFS_ASYNC_METAZONE_ROLLOVER
-  return RollMetaZoneAsync();
-#else
-  return RollMetaZoneLocked();
-#endif // WITH_ZENFS_ASYNC_METAZONE_ROLLOVER
-}
-
-#ifdef WITH_ZENFS_ASYNC_METAZONE_ROLLOVER
-/* Assumes the files_mtx_ is held */
-IOStatus ZenFS::RollMetaZoneAsync() {
-  return IOStatus::IOError("Calling experimental function "
-                           "ZenFS::RollMetaZoneAsync()!!");
-}
-#endif // WITH_ZENFS_ASYNC_METAZONE_ROLLOVER
-
-/* Assumes the files_mtx_ is held */
-IOStatus ZenFS::RollMetaZoneLocked() {
-  ZenMetaLog* new_meta_log;
-  Zone *new_meta_zone, *old_meta_zone;
+IOStatus ZenFS::RollMetaZoneLocked(bool async) {
+  Zone *new_op_zone = nullptr;
   IOStatus s;
   LatencyHistGuard guard(&zbd_->roll_latency_reporter_);
   zbd_->roll_qps_reporter_.AddCount(1);
 
-  new_meta_zone = zbd_->AllocateMetaZone();
+  // reserve write pointer to the old op log to close it later
+  std::shared_ptr<ZenMetaLog> old_op_log = std::move(op_log_);
 
-  if (!new_meta_zone) {
-    assert(false);  // TMP
-    Error(logger_, "Out of metadata zones, we should go to read only now.");
-    return IOStatus::NoSpace("Out of metadata zones");
+  // write snapshot in memory
+  std::shared_ptr<std::string> snapshot(new std::string);
+  WriteSnapshotLocked(snapshot.get());
+  
+  // allocate new mete zone
+  if ((new_op_zone = zbd_->AllocateMetaZone()) == nullptr) {
+    assert(false);
+    Error(logger_, "Out of op log zones, we should go to read only now.");
+    return IOStatus::NoSpace("Out of op log zones");
   }
 
-  Info(logger_, "Rolling to metazone %d\n", (int)new_meta_zone->GetZoneNr());
-  new_meta_log = new ZenMetaLog(zbd_, new_meta_zone);
-  old_meta_zone = meta_log_->GetZone();
-  old_meta_zone->open_for_write_ = false;
-
-  /* Write an end record and finish the meta data zone if there is space left */
-  if (old_meta_zone->GetCapacityLeft()) WriteEndRecord(meta_log_.get());
-  if (old_meta_zone->GetCapacityLeft()) old_meta_zone->Finish();
-
-  meta_log_.reset(new_meta_log);
-
+  Info(logger_, "Rolling to op log %d\n", (int)new_op_zone->GetZoneNr());
+  // shift current write pointer to the new op log zone
+  op_log_.reset(new ZenMetaLog(zbd_, new_op_zone));
+  
+  // encode new super block
   std::string super_string;
-  superblock_->EncodeTo(&super_string);
-
-  s = meta_log_->AddRecord(super_string);
-  if (!s.ok()) {
-    Error(logger_,
-          "Could not write super block when rolling to a new meta zone");
-    return IOStatus::IOError("Failed writing a new superblock");
-  }
-
-  s = WriteSnapshotLocked(meta_log_.get());
-
-  /* We've rolled successfully, we can reset the old zone now */
-  if (s.ok()) {
-    auto t = std::thread([&, old_meta_zone]() {
-      std::unique_lock<std::mutex> lk(zbd_->metazone_reset_mtx_);
-      old_meta_zone->Reset();
-      zbd_->metazone_reset_cv_.notify_one();
-    });
-    t.detach();
-  }
-
-  auto new_meta_zone_size =
-      meta_log_->GetZone()->wp_ - meta_log_->GetZone()->start_;
-  Info(logger_, "Size of new meta zone %ld\n", new_meta_zone_size);
-
-  zbd_->roll_throughput_reporter_.AddCount(new_meta_zone_size);
-  return s;
-}
-
-IOStatus ZenFS::PersistSnapshot(ZenMetaLog* meta_writer) {
-  IOStatus s;
-
-  files_mtx_.lock();
-  metadata_sync_mtx_.lock();
-
-  s = WriteSnapshotLocked(meta_writer);
-  if (s == IOStatus::NoSpace()) {
-    Info(logger_, "Current meta zone full, rolling to next meta zone");
-    s = RollMetaZone();
-  }
+  super_block_->EncodeTo(&super_string);
+  s = op_log_->AddRecord(super_string);
 
   if (!s.ok()) {
     Error(logger_,
-          "Failed persisting a snapshot, we should go to read only now!");
+          "Could not write super block when rolling to a new op log zone");
+    return IOStatus::IOError("Failed writing a new superblock when rolling to a "
+                             "new op log zone");
   }
 
-  metadata_sync_mtx_.unlock();
-  files_mtx_.unlock();
+  auto RollMetaZoneBackground = [&, old_op_log, snapshot]() {
+    IOStatus s;
+
+    // process write snapshot
+    s = snapshot_log_->AddRecord(*snapshot);
+
+    // roll snapshot zone if no space left
+    if (s == IOStatus::NoSpace()) {
+      s = RollSnapshotZone(snapshot.get());
+    }
+
+    if (!s.ok()) {
+      Error(logger_,
+            "Could not write snapshot when rolling to a new snapshpt log zone");
+      assert(false);
+    }
+
+    // finish write and reset old op log zone
+    auto old_op_zone = old_op_log->GetZone();
+    if (old_op_zone->GetCapacityLeft()) WriteEndRecord(old_op_log.get());
+    if (!old_op_zone->Close().ok())
+      assert(false);
+    if (!old_op_zone->Finish().ok())
+      assert(false);
+    if (!old_op_zone->Reset().ok())
+      assert(false);
+  };
+
+
+  if (async) {
+    // Submit async job for : 1. Finish & reset old zone. 2. Write Snapshot.
+    zbd_->meta_worker_->SubmitJob(RollMetaZoneBackground);
+  } else {
+    // Synchronized call for initailization.
+    RollMetaZoneBackground();
+  }
 
   return s;
 }
 
-IOStatus ZenFS::PersistRecord(std::string record) {
+IOStatus ZenFS::PersistRecord(ZenMetaLog* meta_writer, std::string* record) {
   IOStatus s;
-
   metadata_sync_mtx_.lock();
-  s = meta_log_->AddRecord(record);
+  s = meta_writer->AddRecord(*record);
   if (s == IOStatus::NoSpace()) {
     Info(logger_, "Current meta zone full, rolling to next meta zone");
-    s = RollMetaZone();
+    s = RollMetaZoneLocked(true);
     /* After a successfull roll, a complete snapshot has been persisted
      * - no need to write the record update */
   }
   metadata_sync_mtx_.unlock();
-
   return s;
 }
 
@@ -416,7 +431,7 @@ IOStatus ZenFS::SyncFileMetadata(ZoneFile* zoneFile) {
   zoneFile->EncodeUpdateTo(&fileRecord);
   PutLengthPrefixedSlice(&output, Slice(fileRecord));
 
-  s = PersistRecord(output);
+  s = PersistRecord(op_log_.get(), &output);
   if (s.ok()) zoneFile->MetadataSynced();
 
   files_mtx_.unlock();
@@ -454,7 +469,7 @@ IOStatus ZenFS::DeleteFile(std::string fname) {
     files_.erase(fname);
 
     EncodeFileDeletionTo(zoneFile, &record);
-    s = PersistRecord(record);
+    s = PersistRecord(op_log_.get(), &record);
     if (!s.ok()) {
       /* Failed to persist the delete, return to a consistent state */
       files_.insert(std::make_pair(fname.c_str(), zoneFile));
@@ -788,6 +803,23 @@ Status ZenFS::DecodeSnapshotFrom(Slice* input) {
   return Status::OK();
 }
 
+/* This function only read through slices in a snapshot record and
+ * DO NOT add valid slices to files_ to avoid duplicating files
+ * appeared in different snapshots*/
+Status ZenFS::TestSnapshotCorrectness(Slice* input) {
+  Slice slice;
+
+  assert(files_.size() == 0);
+
+  while (GetLengthPrefixedSlice(input, &slice)) {
+    ZoneFile* zoneFile = new ZoneFile(zbd_, "not_set", 0, logger_);
+    Status s = zoneFile->DecodeFrom(&slice);
+    if (!s.ok()) return s;
+  }
+
+  return Status::OK();
+}
+
 void ZenFS::EncodeFileDeletionTo(ZoneFile* zoneFile, std::string* output) {
   std::string file_string;
 
@@ -824,13 +856,16 @@ Status ZenFS::DecodeFileDeletionFrom(Slice* input) {
 }
 
 Status ZenFS::RecoverFrom(ZenMetaLog* log) {
-  bool at_least_one_snapshot = false;
   std::string scratch;
   uint32_t tag = 0;
   Slice record;
   Slice data;
+  Slice last_snapshot;
   Status s;
   bool done = false;
+
+  if (!log->ReadRecord(&record, &scratch).ok()) 
+    return Status::Corruption("ZenFS", "Corrupt super recode.");
 
   while (!done) {
     IOStatus rs = log->ReadRecord(&record, &scratch);
@@ -850,14 +885,13 @@ Status ZenFS::RecoverFrom(ZenMetaLog* log) {
 
     switch (tag) {
       case kCompleteFilesSnapshot:
-        ClearFiles();
-        s = DecodeSnapshotFrom(&data);
+        s = TestSnapshotCorrectness(&data);
         if (!s.ok()) {
           Warn(logger_, "Could not decode complete snapshot: %s",
                s.ToString().c_str());
           return s;
         }
-        at_least_one_snapshot = true;
+        last_snapshot = data;
         break;
 
       case kFileUpdate:
@@ -884,140 +918,131 @@ Status ZenFS::RecoverFrom(ZenMetaLog* log) {
     }
   }
 
-  if (at_least_one_snapshot)
-    return Status::OK();
-  else
-    return Status::NotFound("ZenFS", "No snapshot found");
+  if (!last_snapshot.empty()) {
+    ClearFiles();
+    DecodeSnapshotFrom(&last_snapshot);
+  }
+  return Status::OK();
 }
 
 #define ZENV_URI_PATTERN "zenfs://"
 
-/* Mount the filesystem by recovering form the latest valid metadata zone */
-Status ZenFS::Mount(bool readonly) {
-  std::vector<Zone*> metazones = zbd_->GetMetaZones();
-  std::vector<std::unique_ptr<Superblock>> valid_superblocks;
-  std::vector<std::unique_ptr<ZenMetaLog>> valid_logs;
-  std::vector<Zone*> valid_zones;
-  std::vector<std::pair<uint32_t, uint32_t>> seq_map;
-
+/* Mount the filesystem by recovering form the latest valid snapshot zone
+ * and metadata zone*/
+Status ZenFS::Mount(bool readonly, bool formating) {
+  std::string scratch;
+  Slice super_record;
+  std::unique_ptr<ZenMetaLog> log;
+  std::unique_ptr<Superblock> super_block;
+  uint32_t max_snapshot_seq = 0, max_op_seq = 0;
   Status s;
 
-  /* We need a minimum of two non-offline meta data zones */
-  if (metazones.size() < 2) {
+  // Get snapshot zones
+  std::vector<Zone*> snapshot_zones = zbd_->GetSnapshotZones();
+  if (snapshot_zones.size() < 2) {
+    Error(logger_,
+          "Need at least two non-offline snapshot zones to open for write");
+    return Status::NotSupported();
+  }
+
+  // Iterating snapshot zones to get last one.
+  for (const auto& z : snapshot_zones) {
+    log.reset(new ZenMetaLog(zbd_, z));
+    if (!log->ReadRecord(&super_record, &scratch).ok()) continue;
+    if (super_record.size() == 0) continue;
+    super_block.reset(new Superblock());
+    s = super_block->DecodeFrom(&super_record);
+    if (s.ok()) s = super_block->CompatibleWith(zbd_);
+    if (s.ok() && super_block->GetSeq() > max_snapshot_seq) {
+      max_snapshot_seq = super_block->GetSeq();
+      snapshot_log_.reset(log.release());
+      super_block_.reset(super_block.release());
+    }
+  }
+  
+  if (max_snapshot_seq == 0) {
+    // No avaliable snapshot zone, report error.
+    Error(logger_, "!!!Error : No valid snaphot!!!");
+    return Status::Corruption("Mount", "Error: No valid snaphot.");
+  }
+
+  // Get operation log zones
+  std::vector<Zone*> op_zones = zbd_->GetOpZones();
+  if (op_zones.size() < 2) {
     Error(logger_,
           "Need at least two non-offline meta zones to open for write");
     return Status::NotSupported();
   }
 
-  /* Find all valid superblocks */
-  for (const auto z : metazones) {
-    std::unique_ptr<ZenMetaLog> log;
-    std::string scratch;
-    Slice super_record;
-
+  // Iterating operation log zones to get last one.
+  for (const auto& z : op_zones) {
     log.reset(new ZenMetaLog(zbd_, z));
-
     if (!log->ReadRecord(&super_record, &scratch).ok()) continue;
-
     if (super_record.size() == 0) continue;
-
-    std::unique_ptr<Superblock> super_block;
-
     super_block.reset(new Superblock());
     s = super_block->DecodeFrom(&super_record);
     if (s.ok()) s = super_block->CompatibleWith(zbd_);
-    if (!s.ok()) return s;
-
-    Info(logger_, "Found OK superblock in zone %lu seq: %u\n", z->GetZoneNr(),
-         super_block->GetSeq());
-
-    seq_map.push_back(std::make_pair(super_block->GetSeq(), seq_map.size()));
-    valid_superblocks.push_back(std::move(super_block));
-    valid_logs.push_back(std::move(log));
-    valid_zones.push_back(z);
+    if (s.ok() && super_block->GetSeq() > max_op_seq) {
+      max_op_seq = super_block->GetSeq();
+      op_log_.reset(log.release());
+      if (max_op_seq > max_snapshot_seq) super_block_.reset(super_block.release());
+    }
   }
 
-  if (!seq_map.size()) return Status::NotFound("No valid superblock found");
+  if (max_op_seq == 0) {
+    // No avaliable snapshot zone, report error.
+    Error(logger_, "!!!Error : No valid opreation log!!!");
+    return Status::Corruption("Mount", "Error: No valid opreation log.");
+  }
 
-  /* Sort superblocks by descending sequence number */
-  std::sort(seq_map.begin(), seq_map.end(),
-            std::greater<std::pair<uint32_t, uint32_t>>());
+  assert(op_log_.get() != nullptr);
+  assert(snapshot_log_.get() != nullptr);
+  assert(super_block_.get() != nullptr);
 
-  bool recovery_ok = false;
-  unsigned int r = 0;
+  zbd_->SetFinishTreshold(super_block_->GetFinishTreshold());
+  zbd_->SetMaxActiveZones(super_block_->GetMaxActiveZoneLimit());
+  zbd_->SetMaxOpenZones(super_block_->GetMaxOpenZoneLimit());
 
-  /* Recover from the zone with the highest superblock sequence number.
-     If that fails go to the previous as we might have crashed when rolling
-     metadata zone.
-  */
-  for (const auto& sm : seq_map) {
-    uint32_t i = sm.second;
-    std::string scratch;
-    std::unique_ptr<ZenMetaLog> log = std::move(valid_logs[i]);
+  // Recovery could be skipped if one's intend was formating the disk.
+  if (!formating) {
+    // Normal path, just mount, not format.
+    // Recover snapshot fisrt, then opreation log.
+    s = RecoverFrom(snapshot_log_.get());
+    if (!s.ok() && !readonly) {
+      Error(logger_, "!!!Error : Recover snapshot failed!!!\n%s", s.ToString().c_str());
+      return Status::Corruption("Mount", "Error: Recover snapshot failed.\n");
+    }
+    s = RecoverFrom(op_log_.get());
+    if (!s.ok() && !readonly) {
+      Error(logger_, "!!!Error : Recover opreation log failed!!!\n%s", s.ToString().c_str());
+      return Status::Corruption("Mount", "Error: Recover opreation log failed.");
+    }
 
-    s = RecoverFrom(log.get());
+    IOOptions foo;
+    IODebugContext bar;
+    s = target()->CreateDirIfMissing(super_block_->GetAuxFsPath(),
+                                      foo, &bar);
     if (!s.ok()) {
-      if (s.IsNotFound()) {
-        Warn(logger_,
-             "Did not find a valid snapshot, trying next meta zone. Error: %s",
-             s.ToString().c_str());
-        continue;
-      }
-
-      Error(logger_, "Metadata corruption. Error: %s", s.ToString().c_str());
+      Error(logger_, "Failed to create aux filesystem directory.");
       return s;
     }
 
-    r = i;
-    recovery_ok = true;
-    meta_log_ = std::move(log);
-    break;
-  }
-
-  if (!recovery_ok) {
-    return Status::IOError("Failed to mount filesystem");
-  }
-
-  Info(logger_, "Recovered from zone: %d", (int)valid_zones[r]->GetZoneNr());
-  superblock_ = std::move(valid_superblocks[r]);
-  zbd_->SetFinishTreshold(superblock_->GetFinishTreshold());
-  zbd_->SetMaxActiveZones(superblock_->GetMaxActiveZoneLimit());
-  zbd_->SetMaxOpenZones(superblock_->GetMaxOpenZoneLimit());
-
-  IOOptions foo;
-  IODebugContext bar;
-  s = target()->CreateDirIfMissing(superblock_->GetAuxFsPath(), foo, &bar);
-  if (!s.ok()) {
-    Error(logger_, "Failed to create aux filesystem directory.");
-    return s;
-  }
-
-  /* Free up old metadata zones, to get ready to roll */
-  for (const auto& sm : seq_map) {
-    uint32_t i = sm.second;
-    /* Don't reset the current metadata zone */
-    if (i != r) {
-      /* Metadata zones are not marked as having valid data, so they can be
-       * reset */
-      valid_logs[i].reset();
-    }
-  }
-
-  if (readonly) {
-    Info(logger_, "Mounting READ ONLY");
-  } else {
-    files_mtx_.lock();
-    s = RollMetaZone();
-    if (!s.ok()) {
+    if (readonly) {
+      Info(logger_, "Mounting READ ONLY");
+    } else {
+      files_mtx_.lock();
+      // Synchronized call.
+      s = RollMetaZoneLocked(false);
       files_mtx_.unlock();
-      Error(logger_, "Failed to roll metadata zone.");
-      return s;
+      if (!s.ok()) {
+        Error(logger_, "Failed to roll metadata zone.");
+        return s;
+      }
     }
-    files_mtx_.unlock();
   }
 
-  Info(logger_, "Superblock sequence %d", (int)superblock_->GetSeq());
-  Info(logger_, "Finish threshold %u", superblock_->GetFinishTreshold());
+  Info(logger_, "Superblock sequence %d", (int)super_block_->GetSeq());
+  Info(logger_, "Finish threshold %u", super_block_->GetFinishTreshold());
   Info(logger_, "Filesystem mount OK");
 
   if (!readonly) {
@@ -1033,11 +1058,11 @@ Status ZenFS::Mount(bool readonly) {
 
 Status ZenFS::MkFS(std::string aux_fs_path, uint32_t finish_threshold,
                    uint32_t max_open_limit, uint32_t max_active_limit) {
-  std::vector<Zone*> metazones = zbd_->GetMetaZones();
-  std::unique_ptr<ZenMetaLog> log;
-  Zone* meta_zone = nullptr;
-  IOStatus s;
-
+  Status s;
+  Zone* reset_zone;
+  std::string super_string;
+  Superblock* super_block_ = new Superblock(zbd_, aux_fs_path, finish_threshold,
+                                            max_open_limit, max_active_limit);
   /* TODO: check practical limits */
 
   if (max_open_limit > zbd_->GetMaxOpenZones()) {
@@ -1063,33 +1088,64 @@ Status ZenFS::MkFS(std::string aux_fs_path, uint32_t finish_threshold,
   ClearFiles();
   zbd_->ResetUnusedIOZones();
 
-  for (const auto mz : metazones) {
-    if (mz->Reset().ok()) {
-      if (!meta_zone) meta_zone = mz;
+  // Reset all used snapshot zones and get one for writing a new super block.
+  reset_zone = nullptr;
+  for (const auto& z : zbd_->GetSnapshotZones()) {
+    if (z->Reset().ok()) {
+      if (!reset_zone) reset_zone = z;
     } else {
-      Warn(logger_, "Failed to reset meta zone\n");
-    }
+      Warn(logger_, "Failed to reset the zone\n");
+    } 
   }
 
-  if (!meta_zone) {
-    return Status::IOError("No available meta zones\n");
+  if (!reset_zone) {
+    return Status::IOError("No available zones for snapshots\n");
   }
 
-  log.reset(new ZenMetaLog(zbd_, meta_zone));
-
-  Superblock* super = new Superblock(zbd_, aux_fs_path, finish_threshold,
-                                     max_open_limit, max_active_limit);
-  std::string super_string;
-  super->EncodeTo(&super_string);
-
-  s = log->AddRecord(super_string);
-  if (!s.ok()) return std::move(s);
-
-  /* Write an empty snapshot to make the metadata zone valid */
-  s = PersistSnapshot(log.get());
+  // Write super block for snapshot zone
+  snapshot_log_.reset(new ZenMetaLog(zbd_, reset_zone));
+  super_block_->EncodeTo(&super_string);
+  s = snapshot_log_->AddRecord(super_string);
   if (!s.ok()) {
-    Error(logger_, "Failed to persist snapshot: %s", s.ToString().c_str());
-    return Status::IOError("Failed persist snapshot");
+    Error(logger_, "Failed to reset snapshot: %s", s.ToString().c_str());
+    return Status::IOError("Failed to reset snapshot");
+  }
+
+  // Write an empty snapshot
+  std::string snapshot;
+  WriteSnapshotLocked(&snapshot);
+  snapshot_log_->AddRecord(snapshot);
+  WriteEndRecord(snapshot_log_.get());
+
+  if (!s.ok()) {
+    Error(logger_, "Failed to reset snapshot: %s", s.ToString().c_str());
+    return Status::IOError("Failed to reset snapshot");
+  }
+
+  // Reset all used opreation log zones and get one for writing a new super block.
+  reset_zone = nullptr;
+
+  for (const auto& z : zbd_->GetOpZones()) {
+    if (z->Reset().ok()) {
+      if (!reset_zone) reset_zone = z;
+    } else {
+      Warn(logger_, "Failed to reset the zone\n");
+    } 
+  }
+
+  if (!reset_zone) {
+    return Status::IOError("No available zones for opreation log.\n");
+  }
+
+  // Write super block for meta zone
+  op_log_.reset(new ZenMetaLog(zbd_, reset_zone));
+  super_block_->EncodeTo(&super_string);
+  s = op_log_->AddRecord(super_string);
+  WriteEndRecord(op_log_.get());
+
+  if (!s.ok()) {
+    Error(logger_, "Failed to reset op log: %s", s.ToString().c_str());
+    return Status::IOError("Failed to reset op log");
   }
 
   Info(logger_, "Empty filesystem created");
@@ -1203,12 +1259,12 @@ std::map<std::string, std::string> ListZenFileSystems() {
       IOStatus zbd_status = zbd->Open(true);
 
       if (zbd_status.ok()) {
-        std::vector<Zone*> metazones = zbd->GetMetaZones();
+        std::vector<Zone*> op_zones_ = zbd->GetOpZones();
         std::string scratch;
         Slice super_record;
         Status s;
 
-        for (const auto z : metazones) {
+        for (const auto z : op_zones_) {
           Superblock super_block;
           std::unique_ptr<ZenMetaLog> log;
           log.reset(new ZenMetaLog(zbd, z));

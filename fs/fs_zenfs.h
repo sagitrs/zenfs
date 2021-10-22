@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <string>
 #include "io_zenfs.h"
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
@@ -119,15 +120,16 @@ class ZenMetaLog {
 class ZenFS : public FileSystemWrapper {
   ZonedBlockDevice* zbd_;
   std::map<std::string, ZoneFile*> files_;
+  std::map<std::string, ZoneFile*> mirror_;
   std::mutex files_mtx_;
   std::shared_ptr<Logger> logger_;
   std::atomic<uint64_t> next_file_id_;
 
   Zone* cur_meta_zone_ = nullptr;
-  std::unique_ptr<ZenMetaLog> meta_log_;
-  std::unique_ptr<ZenMetaLog> meta_snapshot_log_;
+  std::unique_ptr<ZenMetaLog> op_log_;
+  std::unique_ptr<ZenMetaLog> snapshot_log_;
   std::mutex metadata_sync_mtx_;
-  std::unique_ptr<Superblock> superblock_;
+  std::unique_ptr<Superblock> super_block_;
 
   std::shared_ptr<Logger> GetLogger() { return logger_; }
 
@@ -151,19 +153,19 @@ class ZenFS : public FileSystemWrapper {
 
   void LogFiles();
   void ClearFiles();
-  IOStatus WriteSnapshotLocked(ZenMetaLog* meta_log);
+  void WriteSnapshotLocked(std::string* snapshot);
   IOStatus WriteEndRecord(ZenMetaLog* meta_log);
-  IOStatus RollMetaZone();
-  IOStatus RollMetaZoneLocked();
+  IOStatus RollMetaZoneLocked(bool async);
+  IOStatus RollSnapshotZone(std::string* snapshot);
   /* experimental function only! */
-  IOStatus RollMetaZoneAsync();
-  IOStatus PersistSnapshot(ZenMetaLog* meta_writer);
-  IOStatus PersistRecord(std::string record);
+  IOStatus PersistRecord(ZenMetaLog* meta_writer, std::string* record);
   IOStatus SyncFileMetadata(ZoneFile* zoneFile);
 
   void EncodeSnapshotTo(std::string* output);
   void EncodeFileDeletionTo(ZoneFile* zoneFile, std::string* output);
 
+  Status TestSnapshotCorrectness(Slice* input);
+  
   Status DecodeSnapshotFrom(Slice* input);
   Status DecodeFileUpdateFrom(Slice* slice);
   Status DecodeFileDeletionFrom(Slice* slice);
@@ -171,12 +173,12 @@ class ZenFS : public FileSystemWrapper {
   Status RecoverFrom(ZenMetaLog* log);
 
   std::string ToAuxPath(std::string path) {
-    return superblock_->GetAuxFsPath() + path;
+    return super_block_->GetAuxFsPath() + path;
   }
 
   std::string ToZenFSPath(std::string aux_path) {
     std::string path = aux_path;
-    path.erase(0, superblock_->GetAuxFsPath().length());
+    path.erase(0, super_block_->GetAuxFsPath().length());
     return path;
   }
 
@@ -189,7 +191,7 @@ class ZenFS : public FileSystemWrapper {
                  std::shared_ptr<Logger> logger);
   virtual ~ZenFS();
 
-  Status Mount(bool readonly);
+  Status Mount(bool readonly, bool formating = false);
   Status MkFS(std::string aux_fs_path, uint32_t finish_threshold,
               uint32_t max_open_limit, uint32_t max_active_limit);
   std::map<std::string, Env::WriteLifeTimeHint> GetWriteLifeTimeHints();

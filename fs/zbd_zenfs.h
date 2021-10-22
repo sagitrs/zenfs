@@ -154,11 +154,13 @@ class ZonedBlockDevice {
   uint32_t block_sz_;
   uint64_t zone_sz_;
   uint32_t nr_zones_;
-  std::vector<Zone *> io_zones;
-  std::mutex io_zones_mtx;
-  std::mutex wal_zones_mtx;
-  std::vector<Zone *> meta_zones;
-  std::vector<Zone *> meta_snapshot_zones;
+  std::vector<Zone *> io_zones_;
+  std::mutex io_zones_mtx_;
+  std::mutex wal_zones_mtx_;
+  // meta log zones used to keep track of running record of metadata
+  std::vector<Zone *> op_zones_;
+  // snapshot zones used to recover entire file system
+  std::vector<Zone *> snapshot_zones_;
   int read_f_;
   int read_direct_f_;
   int write_f_;
@@ -166,7 +168,6 @@ class ZonedBlockDevice {
   std::shared_ptr<Logger> logger_;
   uint32_t finish_threshold_ = 0;
 
-  std::shared_ptr<BackgroundWorker> meta_worker_;
   std::shared_ptr<BackgroundWorker> data_worker_;
   std::list<Zone *> active_zones_list_;
   std::mutex active_zone_list_mtx_;
@@ -174,7 +175,7 @@ class ZonedBlockDevice {
   std::atomic<int> fg_request_;
 
   // If a thread is allocating a zone fro WAL files, other
-  // thread shouldn't take `io_zones_mtx` (see AllocateZone())
+  // thread shouldn't take `io_zones_mtx_` (see AllocateZone())
   std::atomic<uint32_t> wal_zone_allocating_{0};
 
   std::atomic<long> active_io_zones_;
@@ -210,6 +211,7 @@ class ZonedBlockDevice {
 
   Zone *AllocateZone(Env::WriteLifeTimeHint lifetime, bool is_wal);
   Zone *AllocateMetaZone();
+  Zone *AllocateSnapshotZone();
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
@@ -231,8 +233,8 @@ class ZonedBlockDevice {
   uint32_t GetMaxActiveZones() { return max_nr_active_io_zones_ + 1; };
   uint32_t GetMaxOpenZones() { return max_nr_open_io_zones_ + 1; };
 
-  std::vector<Zone *> GetMetaZones() { return meta_zones; }
-  std::vector<Zone *> GetMetaSnapshotZones() { return meta_snapshot_zones; }
+  std::vector<Zone *> GetOpZones() { return op_zones_; }
+  std::vector<Zone *> GetSnapshotZones() { return snapshot_zones_; }
 
   void SetFinishTreshold(uint32_t threshold) { finish_threshold_ = threshold; }
 
@@ -294,6 +296,8 @@ class ZonedBlockDevice {
   using DataReporter = HistReporterHandle &;
   DataReporter active_zones_reporter_;
   DataReporter open_zones_reporter_;
+
+  std::unique_ptr<BackgroundWorker> meta_worker_;
 
  private:
   std::string ErrorToString(int err);
