@@ -466,12 +466,9 @@ ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
 }
 
 IOStatus ZoneFile::Sync() {
-  IOStatus s;
-  if (active_zone_) {
-    s = active_zone_->Sync();
-    if (!s.ok()) return s;
-  }
-  return s;
+  if (active_zone_)
+    return active_zone_->Sync();
+  return IOStatus::OK();
 }
 
 ZonedWritableFile::~ZonedWritableFile() {
@@ -495,7 +492,9 @@ IOStatus ZonedWritableFile::Truncate(uint64_t size,
 IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
-  LatencyHistGuard guard(&zoneFile_->GetZbd()->sync_latency_reporter_);
+  LatencyHistGuard guard(zoneFile_->is_wal_
+                             ? &zoneFile_->GetZbd()->fg_sync_latency_reporter_
+                             : &zoneFile_->GetZbd()->bg_sync_latency_reporter_);
   zoneFile_->GetZbd()->sync_qps_reporter_.AddCount(1);
 
   buffer_mtx_.lock();
