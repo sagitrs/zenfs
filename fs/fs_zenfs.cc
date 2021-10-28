@@ -270,8 +270,21 @@ void ZenFS::ClearFiles() {
 /* Assumes that files_mutex_ is held */
 void ZenFS::WriteSnapshotLocked(std::string* snapshot) {
   EncodeSnapshotTo(snapshot);
-  for (auto& f : files_)
-    f.second->MetadataSynced();
+
+  uint64_t total_extent_length = 0;
+
+  for (auto& f : files_) {
+    ZoneFile* file = f.second;
+    file->MetadataSynced();
+
+    // calculate extent length and add it to reporter
+    for (const ZoneExtent* extent : file->GetExtents()) {
+      total_extent_length += extent->length_;
+    }
+  }
+
+  Info(logger_, "total extent length %lu WriteSnapshotLocked\n", total_extent_length);
+  zbd_->zbd_total_extent_length_reporter_.AddRecord(total_extent_length);
 }
 
 IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
@@ -309,6 +322,8 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
   s = snapshot_log_->AddRecord(*snapshot);
 
   if (s.ok()) {
+    zbd_->ReportSpaceUtilization();
+    
     auto new_snapshot_log_zone_size =
         snapshot_log_->GetZone()->wp_ - snapshot_log_->GetZone()->start_;
     Info(logger_, "Size of new snapshot log zone %ld\n",
@@ -382,6 +397,8 @@ IOStatus ZenFS::RollMetaZoneLocked(bool async) {
             "Could not write snapshot when rolling to a new snapshpt log zone");
       assert(false);
     }
+
+    zbd_->ReportSpaceUtilization();
 
     // finish write and reset old op log zone
     auto old_op_zone = old_op_log->GetZone();
@@ -1123,6 +1140,8 @@ Status ZenFS::MkFS(std::string aux_fs_path, uint32_t finish_threshold,
     Error(logger_, "Failed to reset snapshot: %s", s.ToString().c_str());
     return Status::IOError("Failed to reset snapshot");
   }
+
+  zbd_->ReportSpaceUtilization();
 
   // Reset all used opreation log zones and get one for writing a new super block.
   reset_zone = nullptr;
