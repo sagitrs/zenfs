@@ -11,7 +11,6 @@
 
 #include <errno.h>
 #include <libaio.h>
-#include <libaio.h>
 #include <libzbd/zbd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,6 +70,7 @@ class Zone {
   std::atomic<long> used_capacity_;
   struct zenfs_aio_ctx wr_ctx;
   ZoneState state_;
+  std::mutex reset_mtx_;
 
   IOStatus Reset();
   IOStatus Finish();
@@ -109,7 +109,7 @@ class SimpleJob : public BackgroundJob {
   virtual ~SimpleJob() {}
 };
 
-template<typename ARG_T, typename RET_T>
+template <typename ARG_T, typename RET_T>
 class GeneralJob : public BackgroundJob {
  public:
   // Job requires argument and return value for error handling
@@ -120,8 +120,8 @@ class GeneralJob : public BackgroundJob {
   std::function<void(RET_T)> hdl_;
   // No default allowed
   GeneralJob() = delete;
-  GeneralJob(std::function<RET_T(ARG_T)> fn, ARG_T arg,
-             std::function<void(RET_T)> hdl) : fn_(fn), arg_(arg), hdl_(hdl) {}
+  GeneralJob(std::function<RET_T(ARG_T)> fn, ARG_T arg, std::function<void(RET_T)> hdl)
+      : fn_(fn), arg_(arg), hdl_(hdl) {}
   virtual void operator()() override { hdl_(fn_(arg_)); }
   virtual ~GeneralJob() {}
 };
@@ -144,9 +144,8 @@ class BackgroundWorker {
   // For simple jobs that could be handled in a lambda function.
   void SubmitJob(std::function<void()> fn);
   // For derived jobs which needs arguments
-  void SubmitJob(std::unique_ptr<BackgroundJob>&& job);
+  void SubmitJob(std::unique_ptr<BackgroundJob> &&job);
 };
-
 
 class ZonedBlockDevice {
  private:
@@ -178,15 +177,16 @@ class ZonedBlockDevice {
   // thread shouldn't take `io_zones_mtx_` (see AllocateZone())
   std::atomic<uint32_t> wal_zone_allocating_{0};
 
-  std::atomic<long> active_io_zones_;
-  std::atomic<long> open_io_zones_;
+  std::atomic<int> pending_bg_work_{0};
+
+  std::atomic<long> active_io_zones_{0};
+  std::atomic<long> open_io_zones_{0};
   std::condition_variable zone_resources_;
 
   uint32_t max_nr_active_io_zones_;
   uint32_t max_nr_open_io_zones_;
 
-  void EncodeJsonZone(std::ostream &json_stream,
-                      const std::vector<Zone *> zones);
+  void EncodeJsonZone(std::ostream &json_stream, const std::vector<Zone *> zones);
 
  public:
   std::mutex zone_resources_mtx_; /* Protects active/open io zones */
@@ -195,12 +195,9 @@ class ZonedBlockDevice {
   std::condition_variable metazone_reset_cv_;
 
  public:
-  explicit ZonedBlockDevice(std::string bdevname,
-                            std::shared_ptr<Logger> logger);
-  explicit ZonedBlockDevice(
-      std::string bdevname, std::shared_ptr<Logger> logger,
-      std::string bytedance_tags,
-      std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory);
+  explicit ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger);
+  explicit ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger, std::string bytedance_tags,
+                            std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory);
 
   virtual ~ZonedBlockDevice();
 
@@ -212,6 +209,8 @@ class ZonedBlockDevice {
   Zone *AllocateZone(Env::WriteLifeTimeHint lifetime, bool is_wal);
   Zone *AllocateMetaZone();
   Zone *AllocateSnapshotZone();
+
+  void FinishOrReset(Zone *z, bool reset);
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
