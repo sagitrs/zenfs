@@ -265,8 +265,8 @@ ZoneExtent* ZoneFile::GetExtent(uint64_t file_offset, uint64_t* dev_offset) {
 
 IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
                                   char* scratch, bool direct) {
-  LatencyHistGuard guard(&zbd_->read_latency_reporter_);
-  zbd_->read_qps_reporter_.AddCount(1);
+  LatencyHistGuard guard(&zbd_->metrics_->read_latency_reporter_);
+  zbd_->metrics_->read_qps_reporter_.AddCount(1);
 
   int f = zbd_->GetReadFD();
   int f_direct = zbd_->GetReadDirectFD();
@@ -493,9 +493,9 @@ IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
   LatencyHistGuard guard(zoneFile_->is_wal_
-                             ? &zoneFile_->GetZbd()->fg_sync_latency_reporter_
-                             : &zoneFile_->GetZbd()->bg_sync_latency_reporter_);
-  zoneFile_->GetZbd()->sync_qps_reporter_.AddCount(1);
+                             ? &zoneFile_->GetZbd()->metrics_->fg_sync_latency_reporter_
+                             : &zoneFile_->GetZbd()->metrics_->bg_sync_latency_reporter_);
+  zoneFile_->GetZbd()->metrics_->sync_qps_reporter_.AddCount(1);
 
   buffer_mtx_.lock();
   uint64_t wp0 = wp;
@@ -638,9 +638,9 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                    const IOOptions& /*options*/,
                                    IODebugContext* /*dbg*/) {
   IOStatus s;
-  LatencyHistGuard guard(&zoneFile_->GetZbd()->write_latency_reporter_);
-  zoneFile_->GetZbd()->write_qps_reporter_.AddCount(1);
-  zoneFile_->GetZbd()->write_throughput_reporter_.AddCount(data.size());
+  LatencyHistGuard guard(&zoneFile_->GetZbd()->metrics_->write_latency_reporter_);
+  zoneFile_->GetZbd()->metrics_->write_qps_reporter_.AddCount(1);
+  zoneFile_->GetZbd()->metrics_->write_throughput_reporter_.AddCount(data.size());
 
   if (buffered) {
     buffer_mtx_.lock();

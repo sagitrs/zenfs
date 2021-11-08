@@ -32,6 +32,7 @@
 #include "rocksdb/io_status.h"
 #include "rocksdb/metrics_reporter.h"
 #include "zbd_stat.h"
+#include "metrics.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -194,10 +195,10 @@ class ZonedBlockDevice {
   std::mutex metazone_reset_mtx_;
   std::condition_variable metazone_reset_cv_;
 
+		std::shared_ptr<BytedanceMetrics> metrics_;
+
  public:
   explicit ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger);
-  explicit ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger, std::string bytedance_tags,
-                            std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory);
 
   virtual ~ZonedBlockDevice();
 
@@ -269,38 +270,6 @@ class ZonedBlockDevice {
 
   std::shared_ptr<CurriedMetricsReporterFactory> metrics_reporter_factory_;
   std::string bytedance_tags_;
-
-  using LatencyReporter = HistReporterHandle &;
-  LatencyReporter write_latency_reporter_;
-  LatencyReporter read_latency_reporter_;
-  LatencyReporter fg_sync_latency_reporter_;
-  LatencyReporter bg_sync_latency_reporter_;
-  LatencyReporter meta_alloc_latency_reporter_;
-  LatencyReporter io_alloc_wal_latency_reporter_;
-  LatencyReporter io_alloc_wal_actual_latency_reporter_;
-  LatencyReporter io_alloc_non_wal_latency_reporter_;
-  LatencyReporter io_alloc_non_wal_actual_latency_reporter_;
-  LatencyReporter roll_latency_reporter_;
-
-  using QPSReporter = CountReporterHandle &;
-  QPSReporter write_qps_reporter_;
-  QPSReporter read_qps_reporter_;
-  QPSReporter sync_qps_reporter_;
-  QPSReporter meta_alloc_qps_reporter_;
-  QPSReporter io_alloc_qps_reporter_;
-  QPSReporter roll_qps_reporter_;
-
-  using ThroughputReporter = CountReporterHandle &;
-  ThroughputReporter write_throughput_reporter_;
-  ThroughputReporter roll_throughput_reporter_;
-
-  using DataReporter = HistReporterHandle &;
-  DataReporter active_zones_reporter_;
-  DataReporter open_zones_reporter_;
-  DataReporter zbd_free_space_reporter_;
-  DataReporter zbd_used_space_reporter_;
-  DataReporter zbd_reclaimable_space_reporter_;
-  DataReporter zbd_total_extent_length_reporter_;
 
   std::unique_ptr<BackgroundWorker> meta_worker_;
 

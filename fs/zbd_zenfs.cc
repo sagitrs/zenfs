@@ -335,88 +335,12 @@ void BackgroundWorker::SubmitJob(std::unique_ptr<BackgroundJob> &&job) {
   job_cv_.notify_one();
 }
 
+// ZonedBlockDevice::ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger)
+//    : ZonedBlockDevice(bdevname, logger, "", std::make_shared<ByteDanceMetricsReporterFactory>()) {}
+
 ZonedBlockDevice::ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger)
-    : ZonedBlockDevice(bdevname, logger, "", std::make_shared<ByteDanceMetricsReporterFactory>()) {}
-
-static std::string write_latency_metric_name = "zenfs_write_latency";
-static std::string read_latency_metric_name = "zenfs_read_latency";
-static std::string fg_sync_latency_metric_name = "fg_zenfs_sync_latency";
-static std::string bg_sync_latency_metric_name = "bg_zenfs_sync_latency";
-static std::string io_alloc_wal_latency_metric_name = "zenfs_io_alloc_wal_latency";
-static std::string io_alloc_non_wal_latency_metric_name = "zenfs_io_alloc_non_wal_latency";
-static std::string io_alloc_wal_actual_latency_metric_name = "zenfs_io_alloc_wal_actual_latency";
-static std::string io_alloc_non_wal_actual_latency_metric_name = "zenfs_io_alloc_non_wal_actual_latency";
-static std::string meta_alloc_latency_metric_name = "zenfs_meta_alloc_latency";
-static std::string roll_latency_metric_name = "zenfs_roll_latency";
-
-static std::string write_qps_metric_name = "zenfs_write_qps";
-static std::string read_qps_metric_name = "zenfs_read_qps";
-static std::string sync_qps_metric_name = "zenfs_sync_qps";
-static std::string io_alloc_qps_metric_name = "zenfs_io_alloc_qps";
-static std::string meta_alloc_qps_metric_name = "zenfs_meta_alloc_qps";
-static std::string roll_qps_metric_name = "zenfs_roll_qps";
-
-static std::string write_throughput_metric_name = "zenfs_write_throughput";
-static std::string roll_throughput_metric_name = "zenfs_roll_throughput";
-
-static std::string active_zones_metric_name = "zenfs_active_zones";
-static std::string open_zones_metric_name = "zenfs_open_zones";
-static std::string zbd_free_space_metric_name = "zenfs_free_space";
-static std::string zbd_used_space_metric_name = "zenfs_used_space";
-static std::string zbd_reclaimable_space_metric_name = "zenfs_reclaimable_space";
-static std::string zbd_total_extent_length_metric_name = "zenfs_total_extent_length";
-
-ZonedBlockDevice::ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger, std::string bytedance_tags,
-                                   std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory)
     : filename_("/dev/" + bdevname),
-      logger_(logger),
-      metrics_reporter_factory_(
-          new CurriedMetricsReporterFactory(metrics_reporter_factory, logger.get(), Env::Default())),
-      // A short advice for new developers: BE SURE TO STORE `bytedance_tags_`
-      // somewhere,
-      // and pass the stored `bytedance_tags_` to the reporters. Otherwise the
-      // metrics
-      // library will panic with `std::logic_error`.
-      bytedance_tags_(bytedance_tags),
-      write_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(write_latency_metric_name, bytedance_tags_)),
-      read_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(read_latency_metric_name, bytedance_tags_)),
-      fg_sync_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(fg_sync_latency_metric_name, bytedance_tags_)),
-      bg_sync_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(bg_sync_latency_metric_name, bytedance_tags_)),
-      meta_alloc_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(meta_alloc_latency_metric_name, bytedance_tags_)),
-      io_alloc_wal_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(io_alloc_wal_latency_metric_name, bytedance_tags_)),
-      io_alloc_non_wal_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(io_alloc_non_wal_latency_metric_name, bytedance_tags_)),
-      io_alloc_wal_actual_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(io_alloc_wal_actual_latency_metric_name, bytedance_tags_)),
-      io_alloc_non_wal_actual_latency_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(io_alloc_non_wal_actual_latency_metric_name, bytedance_tags_)),
-      roll_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(roll_latency_metric_name, bytedance_tags_)),
-      write_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(write_qps_metric_name, bytedance_tags_)),
-      read_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(read_qps_metric_name, bytedance_tags_)),
-      sync_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(sync_qps_metric_name, bytedance_tags_)),
-      meta_alloc_qps_reporter_(
-          *metrics_reporter_factory_->BuildCountReporter(meta_alloc_qps_metric_name, bytedance_tags_)),
-      io_alloc_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(io_alloc_qps_metric_name, bytedance_tags_)),
-      roll_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(roll_qps_metric_name, bytedance_tags_)),
-      write_throughput_reporter_(
-          *metrics_reporter_factory_->BuildCountReporter(write_throughput_metric_name, bytedance_tags_)),
-      roll_throughput_reporter_(
-          *metrics_reporter_factory_->BuildCountReporter(roll_throughput_metric_name, bytedance_tags_)),
-      active_zones_reporter_(*metrics_reporter_factory_->BuildHistReporter(active_zones_metric_name, bytedance_tags_)),
-      open_zones_reporter_(*metrics_reporter_factory_->BuildHistReporter(open_zones_metric_name, bytedance_tags_)),
-      zbd_free_space_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(zbd_free_space_metric_name, bytedance_tags_)),
-      zbd_used_space_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(zbd_used_space_metric_name, bytedance_tags_)),
-      zbd_reclaimable_space_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(zbd_reclaimable_space_metric_name, bytedance_tags_)),
-      zbd_total_extent_length_reporter_(
-          *metrics_reporter_factory_->BuildHistReporter(zbd_total_extent_length_metric_name, bytedance_tags_)) {
+      logger_(logger) {
   Info(logger_, "New Zoned Block Device: %s (with metrics enabled)", filename_.c_str());
 }
 
@@ -601,13 +525,13 @@ uint64_t ZonedBlockDevice::GetReclaimableSpace() {
 
 void ZonedBlockDevice::ReportSpaceUtilization() {
   Info(logger_, "zbd free space %lu GB MkFS\n", GetFreeSpace() / (1024 * 1024 * 1024));
-  zbd_free_space_reporter_.AddRecord(GetFreeSpace() / (1024 * 1024 * 1024));
+  metrics_->zbd_free_space_reporter_.AddRecord(GetFreeSpace() / (1024 * 1024 * 1024));
 
   Info(logger_, "zbd used space %lu GB MkFS\n", GetUsedSpace() / (1024 * 1024 * 1024));
-  zbd_used_space_reporter_.AddRecord(GetUsedSpace() / (1024 * 1024 * 1024));
+  metrics_->zbd_used_space_reporter_.AddRecord(GetUsedSpace() / (1024 * 1024 * 1024));
 
   Info(logger_, "zbd reclaimable space %lu GB MkFS\n", GetUsedSpace() / (1024 * 1024 * 1024));
-  zbd_reclaimable_space_reporter_.AddRecord(GetReclaimableSpace() / (1024 * 1024 * 1024));
+  metrics_->zbd_reclaimable_space_reporter_.AddRecord(GetReclaimableSpace() / (1024 * 1024 * 1024));
 }
 
 void ZonedBlockDevice::LogZoneStats() {
@@ -691,8 +615,8 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLif
 }
 
 Zone *ZonedBlockDevice::AllocateMetaZone() {
-  LatencyHistGuard guard(&meta_alloc_latency_reporter_);
-  meta_alloc_qps_reporter_.AddCount(1);
+  LatencyHistGuard guard(&(metrics_->meta_alloc_latency_reporter_));
+  metrics_->meta_alloc_qps_reporter_.AddCount(1);
 
   for (const auto z : op_zones_) {
     if (z->IsEmpty()) {
@@ -704,8 +628,8 @@ Zone *ZonedBlockDevice::AllocateMetaZone() {
 }
 
 Zone *ZonedBlockDevice::AllocateSnapshotZone() {
-  LatencyHistGuard guard(&meta_alloc_latency_reporter_);
-  meta_alloc_qps_reporter_.AddCount(1);
+  LatencyHistGuard guard(&(metrics_->meta_alloc_latency_reporter_));
+  metrics_->meta_alloc_qps_reporter_.AddCount(1);
 
   for (const auto z : snapshot_zones_) {
     if (z->IsEmpty()) {
@@ -737,11 +661,11 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
   // We reserve one more free zone for WAL files in case RocksDB delay close WAL files.
   int reserved_zones = 1;
 
-  auto *reporter_total = is_wal ? &io_alloc_wal_latency_reporter_ : &io_alloc_non_wal_latency_reporter_;
-  auto *reporter_actual = is_wal ? &io_alloc_wal_actual_latency_reporter_ : &io_alloc_non_wal_actual_latency_reporter_;
+  auto *reporter_total = is_wal ? &metrics_->io_alloc_wal_latency_reporter_ : &metrics_->io_alloc_non_wal_latency_reporter_;
+  auto *reporter_actual = is_wal ? &metrics_->io_alloc_wal_actual_latency_reporter_ : &metrics_->io_alloc_non_wal_actual_latency_reporter_;
   LatencyHistGuard guard_total(reporter_total);
 
-  io_alloc_qps_reporter_.AddCount(1);
+  metrics_->io_alloc_qps_reporter_.AddCount(1);
 
   auto t0 = std::chrono::system_clock::now();
 
@@ -910,8 +834,8 @@ active_io_zones_--;
 
   auto t5 = std::chrono::system_clock::now();
 
-  open_zones_reporter_.AddRecord(open_io_zones_);
-  active_zones_reporter_.AddRecord(active_io_zones_);
+  metrics_->open_zones_reporter_.AddRecord(open_io_zones_);
+  metrics_->active_zones_reporter_.AddRecord(active_io_zones_);
 
   std::stringstream ss;
   ss << " is_wal = " << is_wal << " a/o zones " << active_io_zones_.load() << "," << open_io_zones_.load()

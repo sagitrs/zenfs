@@ -211,7 +211,7 @@ IOStatus ZenMetaLog::ReadRecord(Slice* record, std::string* scratch) {
 }
 
 ZenFS::ZenFS(ZonedBlockDevice* zbd, std::shared_ptr<FileSystem> aux_fs,
-             std::shared_ptr<Logger> logger)
+             std::shared_ptr<Logger> logger, std::shared_ptr<BytedanceMetrics> metrics)
     : FileSystemWrapper(aux_fs), zbd_(zbd), logger_(logger) {
   Info(logger_, "ZenFS initializing");
   Info(logger_, "ZenFS parameters: block device: %s, aux filesystem: %s",
@@ -220,6 +220,9 @@ ZenFS::ZenFS(ZonedBlockDevice* zbd, std::shared_ptr<FileSystem> aux_fs,
   Info(logger_, "ZenFS initializing");
   next_file_id_ = 1;
   metadata_writer_.zenFS = this;
+
+		metrics_ = metrics;
+		zbd_->metrics_ = metrics;
 }
 
 ZenFS::~ZenFS() {
@@ -284,15 +287,15 @@ void ZenFS::WriteSnapshotLocked(std::string* snapshot) {
   }
 
   Info(logger_, "total extent length %lu WriteSnapshotLocked\n", total_extent_length);
-  zbd_->zbd_total_extent_length_reporter_.AddRecord(total_extent_length);
+  metrics_->zbd_total_extent_length_reporter_.AddRecord(total_extent_length);
 }
 
 IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
   IOStatus s;
   ZenMetaLog* old_snapshot_log = snapshot_log_.get();
   Zone *new_snapshot_zone;
-  LatencyHistGuard guard(&zbd_->roll_latency_reporter_);
-  zbd_->roll_qps_reporter_.AddCount(1);
+  LatencyHistGuard guard(&metrics_->roll_latency_reporter_);
+  metrics_->roll_qps_reporter_.AddCount(1);
 
   // Close and finish old zone at first place to release active zone resources.
   old_snapshot_log->GetZone()->Close();
@@ -328,7 +331,7 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
         snapshot_log_->GetZone()->wp_ - snapshot_log_->GetZone()->start_;
     Info(logger_, "Size of new snapshot log zone %ld\n",
          new_snapshot_log_zone_size);
-    zbd_->roll_throughput_reporter_.AddCount(new_snapshot_log_zone_size);
+    metrics_->roll_throughput_reporter_.AddCount(new_snapshot_log_zone_size);
 
     /* We've rolled successfully, we can reset the old zone now */
     old_snapshot_log->GetZone()->Reset();
@@ -348,8 +351,8 @@ IOStatus ZenFS::WriteEndRecord(ZenMetaLog* meta_log) {
 IOStatus ZenFS::RollMetaZoneLocked(bool async) {
   Zone *new_op_zone = nullptr;
   IOStatus s;
-  LatencyHistGuard guard(&zbd_->roll_latency_reporter_);
-  zbd_->roll_qps_reporter_.AddCount(1);
+  LatencyHistGuard guard(&metrics_->roll_latency_reporter_);
+  metrics_->roll_qps_reporter_.AddCount(1);
 
   // reserve write pointer to the old op log to close it later
   std::shared_ptr<ZenMetaLog> old_op_log = std::move(op_log_);
@@ -1237,8 +1240,8 @@ static std::string GetLogFilename(std::string bdev) {
 }
 
 Status NewZenFS(
-    FileSystem** fs, const std::string& bdevname, std::string bytedance_tags_,
-    std::shared_ptr<MetricsReporterFactory> metrics_reporter_factory_) {
+    FileSystem** fs, const std::string& bdevname, std::string bytedance_tags,
+    std::shared_ptr<MetricsReporterFactory> metrics_factory) {
   std::shared_ptr<Logger> logger;
   Status s;
 
@@ -1248,8 +1251,7 @@ Status NewZenFS(
   } else {
     logger->SetInfoLogLevel(DEBUG_LEVEL);
   }
-  ZonedBlockDevice* zbd = new ZonedBlockDevice(
-      bdevname, logger, bytedance_tags_, metrics_reporter_factory_);
+  ZonedBlockDevice* zbd = new ZonedBlockDevice(bdevname, logger);
   IOStatus zbd_status = zbd->Open();
   if (!zbd_status.ok()) {
     Error(logger, "Failed to open zoned block device: %s",
@@ -1257,7 +1259,9 @@ Status NewZenFS(
     return Status::IOError(zbd_status.ToString());
   }
 
-  ZenFS* zenFS = new ZenFS(zbd, FileSystem::Default(), logger);
+		auto metrics = std::make_shared<BytedanceMetrics>(metrics_factory, bytedance_tags, logger);
+
+  ZenFS* zenFS = new ZenFS(zbd, FileSystem::Default(), logger, metrics);
   s = zenFS->Mount(false);
   if (!s.ok()) {
     delete zenFS;

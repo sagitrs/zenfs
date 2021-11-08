@@ -133,6 +133,8 @@ class ZenFS : public FileSystemWrapper {
 
   std::shared_ptr<Logger> GetLogger() { return logger_; }
 
+		std::shared_ptr<BytedanceMetrics> metrics_;
+
   struct MetadataWriter : public ZonedWritableFile::MetadataWriter {
     ZenFS* zenFS;
     IOStatus Persist(ZoneFile* zoneFile) {
@@ -188,7 +190,7 @@ class ZenFS : public FileSystemWrapper {
 
  public:
   explicit ZenFS(ZonedBlockDevice* zbd, std::shared_ptr<FileSystem> aux_fs,
-                 std::shared_ptr<Logger> logger);
+                 std::shared_ptr<Logger> logger, std::shared_ptr<BytedanceMetrics> metrics);
   virtual ~ZenFS();
 
   Status Mount(bool readonly, bool formating = false);
