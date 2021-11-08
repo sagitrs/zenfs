@@ -221,6 +221,23 @@ ZenFS::~ZenFS() {
   delete zbd_;
 }
 
+void ZenFS::Repair() {
+  std::map<std::string, std::shared_ptr<ZoneFile>>::iterator it;
+  for (it = files_.begin(); it != files_.end(); it++) {
+    const char *filename = it->first.c_str();
+    std::shared_ptr<ZoneFile> zFile = it->second;
+    if (zFile->HasActiveExtent()) {
+      fprintf(stderr, "Recovering data for: %s \n", filename);
+      IOStatus s = zFile->Recover();
+      if (!s.ok()) {
+        fprintf(stderr, "   Recovery failed\n");
+      } else {
+        fprintf(stderr, "   Recovery ok\n");
+      }
+    }
+  }
+}
+
 void ZenFS::LogFiles() {
   std::map<std::string, std::shared_ptr<ZoneFile>>::iterator it;
   uint64_t total_size = 0;
@@ -230,8 +247,8 @@ void ZenFS::LogFiles() {
     std::shared_ptr<ZoneFile> zFile = it->second;
     std::vector<ZoneExtent*> extents = zFile->GetExtents();
 
-    Info(logger_, "    %-45s sz: %lu lh: %d", it->first.c_str(),
-         zFile->GetFileSize(), zFile->GetWriteLifeTimeHint());
+    Info(logger_, "    %-45s sz: %lu lh: %d sparse: %u", it->first.c_str(),
+         zFile->GetFileSize(), zFile->GetWriteLifeTimeHint(), zFile->IsSparse());
     for (unsigned int i = 0; i < extents.size(); i++) {
       ZoneExtent* extent = extents[i];
       Info(logger_, "          Extent %u {start=0x%lx, zone=%u, len=%u} ", i,
@@ -360,7 +377,7 @@ IOStatus ZenFS::PersistRecord(std::string record) {
   return s;
 }
 
-IOStatus ZenFS::SyncFileMetadata(std::shared_ptr<ZoneFile> zoneFile) {
+IOStatus ZenFS::SyncFileMetadata(ZoneFile *zoneFile) {
   std::string fileRecord;
   std::string output;
   IOStatus s;
@@ -417,6 +434,11 @@ IOStatus ZenFS::DeleteFile(std::string fname) {
   } else {
     s = IOStatus::NotFound("ZenFS::DeleteFile(): File not found");
   }
+  files_mtx_.unlock();
+
+  if (s.ok())
+    zbd_->ResetUnusedIOZones();
+
   return s;
 }
 
@@ -473,6 +495,8 @@ IOStatus ZenFS::NewWritableFile(const std::string& fname,
   std::shared_ptr<ZoneFile> zoneFile(
       new ZoneFile(zbd_, fname, next_file_id_++));
   zoneFile->SetFileModificationTime(time(0));
+  zoneFile->SetIOType(file_opts.io_options.type);
+  zoneFile->SetSparse(!file_opts.use_direct_writes);
 
   /* Persist the creation of the file */
   s = SyncFileMetadata(zoneFile);
@@ -974,6 +998,9 @@ Status ZenFS::Mount(bool readonly) {
     }
   }
 
+  // TODO: handle unsuccessful repair
+  Repair();
+
   if (readonly) {
     Info(logger_, "Mounting READ ONLY");
   } else {
@@ -991,8 +1018,11 @@ Status ZenFS::Mount(bool readonly) {
 
   if (!readonly) {
     Info(logger_, "Resetting unused IO Zones..");
-    Status status = zbd_->ResetUnusedIOZones();
-    if (!status.ok()) return status;
+    s = zbd_->ResetUnusedIOZones();
+    if (!s.ok()) {
+      Error(logger_, "Failed resetting unused IO Zones");
+      return Status::IOError("Failed to reset unused IO Zones during mount");
+    }
     Info(logger_, "  Done");
   }
 

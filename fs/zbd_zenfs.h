@@ -26,6 +26,7 @@
 #include "metrics.h"
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
+#include "rocksdb/file_system.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -70,9 +71,6 @@ class Zone {
 
   void EncodeJson(std::ostream &json_stream);
 
-  IOStatus CloseWR(); /* Done writing */
-
-  inline IOStatus CheckRelease();
 };
 
 class ZonedBlockDevice {
@@ -82,7 +80,6 @@ class ZonedBlockDevice {
   uint64_t zone_sz_;
   uint32_t nr_zones_;
   std::vector<Zone *> io_zones;
-  std::mutex io_zones_mtx;
   std::vector<Zone *> meta_zones;
   int read_f_;
   int read_direct_f_;
@@ -120,8 +117,8 @@ class ZonedBlockDevice {
 
   Zone *GetIOZone(uint64_t offset);
 
-  IOStatus AllocateZone(Env::WriteLifeTimeHint file_lifetime, Zone **out_zone);
-  IOStatus AllocateMetaZone(Zone **out_meta_zone);
+  Zone *AllocateIOZone(Env::WriteLifeTimeHint lifetime, IOType io_type);
+  Zone *AllocateMetaZone();
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
@@ -130,7 +127,6 @@ class ZonedBlockDevice {
   std::string GetFilename();
   uint32_t GetBlockSize();
 
-  Status ResetUnusedIOZones();
   void LogZoneStats();
   void LogZoneUsage();
 
@@ -144,20 +140,24 @@ class ZonedBlockDevice {
 
   void SetFinishTreshold(uint32_t threshold) { finish_threshold_ = threshold; }
 
-  void NotifyIOZoneFull();
-  void NotifyIOZoneClosed();
+  void PutOpenIOZoneToken();
+  void PutActiveIOZoneToken();
 
   void EncodeJson(std::ostream &json_stream);
 
-  void SetZoneDeferredStatus(IOStatus status);
-
-  std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
-
-  void GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot);
+  std::mutex zone_resources_mtx_; /* Protects active/open io zones */
+  IOStatus ResetUnusedIOZones();
 
  private:
   std::string ErrorToString(int err);
-  IOStatus GetZoneDeferredStatus();
+  bool GetActiveIOZoneTokenIfAvailable();
+  void WaitForOpenIOZoneToken();
+
+  IOStatus ApplyFinishThreshold();
+  IOStatus FinishCheapestIOZone();
+  Zone *GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetime, unsigned int *best_diff_out);
+  Zone *AllocateEmptyZone();
+
 };
 
 }  // namespace ROCKSDB_NAMESPACE
