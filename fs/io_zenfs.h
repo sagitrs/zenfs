@@ -39,24 +39,44 @@ class ZoneExtent {
   void EncodeJson(std::ostream& json_stream);
 };
 
+class ZoneFile;
+
+/* Interface for persisting metadata for files */
+class MetadataWriter {
+ public:
+  virtual ~MetadataWriter();
+  virtual IOStatus Persist(ZoneFile *zoneFile) = 0;
+};
+
 class ZoneFile {
- protected:
+
+ private:
+  const uint64_t NO_EXTENT = 0xffffffffffffffff;
+
   ZonedBlockDevice* zbd_;
+
   std::vector<ZoneExtent*> extents_;
+
   Zone* active_zone_;
-  uint64_t extent_start_;
-  uint64_t extent_filepos_;
+  uint64_t extent_start_ = NO_EXTENT;
+  uint64_t extent_filepos_ = 0;
 
   Env::WriteLifeTimeHint lifetime_;
+  IOType io_type_; /* Only used when writing */
   uint64_t fileSize;
   std::string filename_;
   uint64_t file_id_;
 
-  uint32_t nr_synced_extents_;
+  uint32_t nr_synced_extents_ = 0;
   bool open_for_wr_ = false;
   time_t m_time_;
+  bool is_sparse_ = false;
+
+  MetadataWriter* metadata_writer_ = NULL;
 
  public:
+  static const int SPARSE_HEADER_SIZE = 8;
+
   explicit ZoneFile(ZonedBlockDevice* zbd, std::string filename,
                     uint64_t file_id_);
 
@@ -65,9 +85,12 @@ class ZoneFile {
   void OpenWR();
   IOStatus CloseWR();
   bool IsOpenForWR();
+  IOStatus PersistMetadata();
 
-  IOStatus Append(void* data, int data_size, int valid_size);
+  IOStatus Append(void* buffer, int data_size);
+  IOStatus SparseAppend(char* data, uint32_t size);
   IOStatus SetWriteLifeTimeHint(Env::WriteLifeTimeHint lifetime);
+  void SetIOType(IOType io_type);
   std::string GetFilename();
   void Rename(std::string name);
   time_t GetFileModificationTime();
@@ -84,6 +107,7 @@ class ZoneFile {
                           char* scratch, bool direct);
   ZoneExtent* GetExtent(uint64_t file_offset, uint64_t* dev_offset);
   void PushExtent();
+  IOStatus AllocateNewZone();
 
   void EncodeTo(std::string* output, uint32_t extent_start);
   void EncodeUpdateTo(std::string* output) {
@@ -99,6 +123,14 @@ class ZoneFile {
   uint64_t GetID() { return file_id_; }
   size_t GetUniqueId(char* id, size_t max_size);
 
+  bool IsSparse() { return is_sparse_; };
+
+  void SetSparse(bool is_sparse) { is_sparse_ = is_sparse; };
+  uint64_t HasActiveExtent() { return extent_start_ != NO_EXTENT; };
+  uint64_t GetExtentStart() { return extent_start_; };
+
+ IOStatus Recover();
+
  private:
   void ReleaseActiveZone();
   void SetActiveZone(Zone* zone);
@@ -108,12 +140,6 @@ class ZoneFile {
 
 class ZonedWritableFile : public FSWritableFile {
  public:
-  /* Interface for persisting metadata for files */
-  class MetadataWriter {
-   public:
-    virtual ~MetadataWriter();
-    virtual IOStatus Persist(std::shared_ptr<ZoneFile> zoneFile) = 0;
-  };
 
   explicit ZonedWritableFile(ZonedBlockDevice* zbd, bool buffered,
                              std::shared_ptr<ZoneFile> zoneFile,
@@ -161,8 +187,10 @@ class ZonedWritableFile : public FSWritableFile {
  private:
   IOStatus BufferedWrite(const Slice& data);
   IOStatus FlushBuffer();
+  IOStatus DataSync();
 
   bool buffered;
+  char* sparse_buffer;
   char* buffer;
   size_t buffer_sz;
   uint32_t block_sz;
