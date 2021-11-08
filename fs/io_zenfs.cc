@@ -268,6 +268,7 @@ IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
   LatencyHistGuard guard(&zbd_->metrics_->read_latency_reporter_);
   zbd_->metrics_->read_qps_reporter_.AddCount(1);
 
+
   int f = zbd_->GetReadFD();
   int f_direct = zbd_->GetReadDirectFD();
   char* ptr;
@@ -281,6 +282,9 @@ IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
 
   if (offset >= fileSize) {
     *result = Slice(scratch, 0);
+    Debug(logger_,
+		"ZoneFile::PositionedRead, file: %s (%ld, %ld), read exceed filesize \n", 
+		filename_.c_str(), offset, n);
     return IOStatus::OK();
   }
 
@@ -441,8 +445,7 @@ ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
   buffer_pos = 0;
 
   zoneFile_ = zoneFile;
-  // For non-wal files, we uses a larger buffer size to fit rocksdb
-  // bytes_per_sync.
+  // For SST files, we use larger buffer size
   if (!zoneFile_->is_wal_) {
     buffer_sz = block_sz * 256;
   }
@@ -489,13 +492,14 @@ IOStatus ZonedWritableFile::Truncate(uint64_t size,
   return IOStatus::OK();
 }
 
+
 IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
   LatencyHistGuard guard(zoneFile_->is_wal_
-                             ? &zoneFile_->GetZbd()->metrics_->fg_sync_latency_reporter_
-                             : &zoneFile_->GetZbd()->metrics_->bg_sync_latency_reporter_);
-  zoneFile_->GetZbd()->metrics_->sync_qps_reporter_.AddCount(1);
+                             ? &zoneFile_->GetMetrics()->fg_sync_latency_reporter_
+                             : &zoneFile_->GetMetrics()->bg_sync_latency_reporter_);
+  zoneFile_->GetMetrics()->sync_qps_reporter_.AddCount(1);
 
   buffer_mtx_.lock();
   uint64_t wp0 = wp;
@@ -507,11 +511,12 @@ IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
 
   if (!s.ok()) return s;
 
-  // RocksDB sync an alread synced file (empty buffer)
+  // Prevent RocksDB from sycning empty buffer.
   if (wp0 != wp) {
     zoneFile_->PushExtent();
     s = metadata_writer_->Persist(zoneFile_);
   }
+
   return s;
 }
 
@@ -555,7 +560,7 @@ IOStatus ZonedWritableFile::FlushBuffer() {
   if (pad_sz) memset((char*)buffer + buffer_pos, 0x0, pad_sz);
 
   wr_sz = buffer_pos + pad_sz;
-  s = zoneFile_->Append((char*)buffer, wr_sz, buffer_pos);
+  s = zoneFile_->Append((char*)buffer, wr_sz, buffer_pos, false);
   if (!s.ok()) {
     return s;
   }
@@ -638,9 +643,11 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                    const IOOptions& /*options*/,
                                    IODebugContext* /*dbg*/) {
   IOStatus s;
-  LatencyHistGuard guard(&zoneFile_->GetZbd()->metrics_->write_latency_reporter_);
-  zoneFile_->GetZbd()->metrics_->write_qps_reporter_.AddCount(1);
-  zoneFile_->GetZbd()->metrics_->write_throughput_reporter_.AddCount(data.size());
+  zoneFile_->GetMetrics()->write_qps_reporter_.AddCount(1);
+  zoneFile_->GetMetrics()->write_throughput_reporter_.AddCount(data.size());
+  LatencyHistGuard guard(zoneFile_->is_wal_
+                             ? &zoneFile_->GetMetrics()->fg_write_latency_reporter_
+                             : &zoneFile_->GetMetrics()->bg_write_latency_reporter_);
 
   if (buffered) {
     buffer_mtx_.lock();

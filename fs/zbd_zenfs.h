@@ -28,11 +28,11 @@
 #include <utility>
 #include <vector>
 
+#include "metrics.h"
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
 #include "rocksdb/metrics_reporter.h"
 #include "zbd_stat.h"
-#include "metrics.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -45,16 +45,6 @@ struct zenfs_aio_ctx {
   int inflight;
   int fd;
 };
-
-/* From prespective of foreground thread, a single zone could be one of these
- * status.
- * kEmpty        | Zone is empty. Could be meta zone or data zone.
- * kActive       | This data zone is open for write.
- * kReadOnly     | This data zone is read only.
- * kMetaLog      | This zone is for meta logging.
- * kMetaSnapshot | This zone is used to store meta snapshots.
- */
-enum ZoneState { kEmpty = 0, kActive, kReadOnly, kMetaLog, kMetaSnapshot };
 
 class Zone {
   ZonedBlockDevice *zbd_;
@@ -70,8 +60,9 @@ class Zone {
   Env::WriteLifeTimeHint lifetime_;
   std::atomic<long> used_capacity_;
   struct zenfs_aio_ctx wr_ctx;
-  ZoneState state_;
-  std::mutex reset_mtx_;
+
+  // If current zone is been resetting or finishing.
+  std::atomic<bool> processing_{false};
 
   IOStatus Reset();
   IOStatus Finish();
@@ -168,12 +159,6 @@ class ZonedBlockDevice {
   std::shared_ptr<Logger> logger_;
   uint32_t finish_threshold_ = 0;
 
-  std::shared_ptr<BackgroundWorker> data_worker_;
-  std::list<Zone *> active_zones_list_;
-  std::mutex active_zone_list_mtx_;
-
-  std::atomic<int> fg_request_;
-
   // If a thread is allocating a zone fro WAL files, other
   // thread shouldn't take `io_zones_mtx_` (see AllocateZone())
   std::atomic<uint32_t> wal_zone_allocating_{0};
@@ -195,7 +180,7 @@ class ZonedBlockDevice {
   std::mutex metazone_reset_mtx_;
   std::condition_variable metazone_reset_cv_;
 
-		std::shared_ptr<BytedanceMetrics> metrics_;
+  std::shared_ptr<BytedanceMetrics> metrics_;
 
  public:
   explicit ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger);
@@ -211,8 +196,9 @@ class ZonedBlockDevice {
   Zone *AllocateMetaZone();
   Zone *AllocateSnapshotZone();
 
-  void FinishOrReset(Zone *z, bool reset);
+  void FinishOrReset(Zone *z, bool reset = false);
 
+  int GetResetableZones();
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
   uint64_t GetReclaimableSpace();
@@ -268,10 +254,8 @@ class ZonedBlockDevice {
 
   std::vector<ZoneStat> GetStat();
 
-  std::shared_ptr<CurriedMetricsReporterFactory> metrics_reporter_factory_;
-  std::string bytedance_tags_;
-
   std::unique_ptr<BackgroundWorker> meta_worker_;
+  std::unique_ptr<BackgroundWorker> data_worker_;
 
  private:
   std::string ErrorToString(int err);
