@@ -7,7 +7,6 @@
 #include <gflags/gflags.h>
 
 #include <rocksdb/file_system.h>
-#include <fs/fs_zenfs.h>
 
 #include <atomic>
 #include <cmath>
@@ -18,6 +17,10 @@
 #include <random>
 #include <streambuf>
 #include <thread>
+
+#include "fs/fs_zenfs.h"
+#include "fs/metrics.h"
+#include "utilities/trace/bytedance_metrics_reporter.h"
 
 using GFLAGS_NAMESPACE::ParseCommandLineFlags;
 using GFLAGS_NAMESPACE::RegisterFlagValidator;
@@ -55,7 +58,8 @@ ZonedBlockDevice *zbd_open(bool readonly, std::shared_ptr<Logger> logger) {
 Status zenfs_mount(ZonedBlockDevice *zbd, ZenFS **zenFS, bool readonly, std::shared_ptr<Logger> logger) {
   Status s;
 
-  *zenFS = new ZenFS(zbd, FileSystem::Default(), logger);
+  auto metrics = std::make_shared<BytedanceMetrics>(std::make_shared<ByteDanceMetricsReporterFactory>(), "", logger);
+  *zenFS = new ZenFS(zbd, FileSystem::Default(), logger, metrics);
   s = (*zenFS)->Mount(readonly);
   if (!s.ok()) {
     delete *zenFS;
