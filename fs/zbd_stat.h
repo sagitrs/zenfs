@@ -28,6 +28,32 @@ class ZoneStat {
   std::vector<ZoneFileStat> files;
 };
 
+struct ZenFSMetrics {
+public:
+  ZenFSMetrics() {}
+  virtual ~ZenFSMetrics() {}
+public:
+  virtual void AddReporter(const std::string& label, const std::string& type = "") = 0;
+public: // For Record Reporter:
+  virtual void AddRecord(const std::string& label, size_t value) = 0;
+  virtual void* GetRecord(const std::string& label) = 0;
+};
+
+struct NoZenFSMetrics : public ZenFSMetrics {
+  NoZenFSMetrics() : ZenFSMetrics() {}
+public:
+  virtual void AddReporter(const std::string& label, const std::string& type = "") override {
+    // Do nothing.
+  }
+  virtual void AddRecord(const std::string& label, size_t value) override {
+    // Do nothing.
+  }
+  virtual void* GetRecord(const std::string& label) override {
+    return nullptr;
+    // Do nothing.
+  }
+};
+
 }  // namespace ROCKSDB_NAMESPACE
 
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
