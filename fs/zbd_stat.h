@@ -41,6 +41,7 @@ public: // For Record Reporter:
 
 struct NoZenFSMetrics : public ZenFSMetrics {
   NoZenFSMetrics() : ZenFSMetrics() {}
+  virtual ~NoZenFSMetrics() {}
 public:
   virtual void AddReporter(const std::string& label, const std::string& type = "") override {
     // Do nothing.
