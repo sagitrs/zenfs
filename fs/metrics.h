@@ -124,34 +124,113 @@ public:
   ZenFSMetrics() {}
   virtual ~ZenFSMetrics() {}
 public:
-  void AddReporter(const std::string& label, const std::string& type = "") = 0;
-  //MetricsReporter* GetReporter(const std::string& label) { return nullptr; }
-  //size_t GetReporter_Debug(const std::string& label) = 0;
-  void* GetReporter(const std::string& label) = 0;
-  void DisposeReporter(const std::string& label) = 0;
+  virtual void AddReporter(const std::string& label, const std::string& type = "") = 0;
+public: // For Record Reporter:
+  virtual void AddRecord(const std::string& label, size_t value) = 0;
+  virtual void* GetRecord(const std::string& label) = 0;
+};
 
-public: // For Count Reporter:
-  void AddCount(const std::string& label) = 0;
-public: // For Hist Reporter:
-  void AddRecord(const std::string& label, size_t size) = 0;
+struct NoZenFSMetrics : public ZenFSMetrics {
+  NoZenFSMetrics() : ZenFSMetrics() {}
 public:
-  ZenFSMetrics(ZenFSMetrics&) = delete;
+  virtual void AddReporter(const std::string& label, const std::string& type = "") override {
+    // Do nothing.
+  }
+  virtual void AddRecord(const std::string& label, size_t value) override {
+    // Do nothing.
+  }
+  virtual void* GetRecord(const std::string& label) override {
+    return nullptr;
+    // Do nothing.
+  }
 };
 
 struct BDZenFSMetrics : public ZenFSMetrics {
 public:
-  enum TypeReporter { TypeHistReporter = 1, TypeCountReporter = 2, TypeNull = 3 };
-  struct ReporterHandle {
+  struct Reporter {
     void* handle_;
-    TypeReporter type_;
-    ReporterHandle(HistReporterHandle* handle, TypeReporter type) : handle_(handle), type_(type) {}
-    ReporterHandle(CountReporterHandle* handle, TypeReporter type) : handle_(handle), type_(type) {}
+    std::string type_;
+    Reporter(void* handle = nullptr, const std::string& type = "") 
+      : handle_(handle), type_(type) {}
   };
 public:
   std::string bytedance_tags_;
   std::shared_ptr<CurriedMetricsReporterFactory> factory_;
-  std::map<std::string, ReporterHandle> reporter_map_;
+  std::map<std::string, Reporter> reporter_map_;
 public:
+  virtual void AddReporter(const std::string& label, const Reporter& reporter) {
+    assert(reporter_map_.find(label) == reporter_map_.end());
+    reporter_map_[label] = reporter;
+  }
+  virtual void AddReporter(const std::string& label, const std::string& type_string = "") override {
+    if (type_string == type_hist_reporter) {
+      AddReporter(label, Reporter(factory_->BuildHistReporter(fg_write_lat_label, bytedance_tags_), type_string));
+    } else if (type_string == type_count_reporter) {
+      AddReporter(label, Reporter(factory_->BuildCountReporter(meta_alloc_qps_label, bytedance_tags_), type_string));
+    } else {
+      assert(false);
+      AddReporter(label, Reporter(nullptr, ""));
+    }
+  }
+
+public: // For Record Reporter:
+  virtual void AddRecord(const std::string& label, size_t size) override {
+    assert(reporter_map_.find(label) != reporter_map_.end());
+    Reporter rep = reporter_map_[label];
+    if (rep.type_ == type_hist_reporter) {
+      reinterpret_cast<HistReporterHandle*>(rep.handle_)->AddRecord(size);
+    } else if (rep.type_ == type_count_reporter) {
+      reinterpret_cast<CountReporterHandle*>(rep.handle_)->AddCount(size);
+    } else {
+      assert(false);
+    }
+  }
+  virtual void* GetRecord(const std::string& label) override {
+    assert(false);
+    return reporter_map_[label].handle_;
+  }
+    
+  virtual ~BDZenFSMetrics() {}
+
+ public:
+  BDZenFSMetrics(std::shared_ptr<MetricsReporterFactory> factory, std::string bytedance_tags, std::shared_ptr<Logger> logger):
+    ZenFSMetrics(),
+    bytedance_tags_(bytedance_tags),
+    factory_(new CurriedMetricsReporterFactory(factory, logger.get(), Env::Default())) {
+      AddReporter(fg_write_lat_label, type_hist_reporter);
+      AddReporter(bg_write_lat_label, type_hist_reporter);
+      AddReporter(read_lat_label, type_hist_reporter);
+      AddReporter(fg_sync_lat_label, type_hist_reporter);
+      AddReporter(bg_sync_lat_label, type_hist_reporter);
+      AddReporter(meta_alloc_lat_label, type_hist_reporter);
+      AddReporter(sync_metadata_lat_label, type_hist_reporter);
+      AddReporter(io_alloc_wal_lat_label, type_hist_reporter);
+      AddReporter(io_alloc_wal_actual_lat_label, type_hist_reporter);
+      AddReporter(io_alloc_non_wal_lat_label, type_hist_reporter);
+      AddReporter(io_alloc_non_wal_actual_lat_label, type_hist_reporter);
+      AddReporter(roll_lat_label, type_hist_reporter);
+
+      AddReporter(write_qps_label, type_count_reporter);
+      AddReporter(read_qps_label, type_count_reporter);
+      AddReporter(sync_qps_label, type_count_reporter);
+      AddReporter(meta_alloc_qps_label, type_count_reporter);
+      AddReporter(io_alloc_qps_label, type_count_reporter);
+      AddReporter(roll_qps_label, type_count_reporter);
+      AddReporter(write_throughput_label, type_count_reporter);
+      AddReporter(roll_throughput_label, type_count_reporter);
+
+      AddReporter(active_zones_label, type_hist_reporter);
+      AddReporter(open_zones_label, type_hist_reporter);
+      AddReporter(zbd_free_space_label, type_hist_reporter);
+      AddReporter(zbd_used_space_label, type_hist_reporter);
+      AddReporter(zbd_reclaimable_space_label, type_hist_reporter);
+      AddReporter(zbd_resetable_zones_label, type_hist_reporter);
+    }
+
+public:
+  std::string type_hist_reporter = "zenfs_type_hist_reporter";
+  std::string type_count_reporter = "zenfs_type_count_reporter";
+
   std::string fg_write_lat_label = "zenfs_fg_write_latency";
   std::string bg_write_lat_label = "zenfs_bg_write_latency";
 
@@ -182,72 +261,6 @@ public:
   std::string zbd_used_space_label = "zenfs_used_space";
   std::string zbd_reclaimable_space_label = "zenfs_reclaimable_space";
   std::string zbd_resetable_zones_label = "zenfs_resetable_zones";
-public:
-
-  void AddReporter(const std::string& label, ReporterHandle* reporter) {
-    if (reporter_map_.find(label) != reporter_map_.end()) {
-      DisposeReporter(reporter_map_[label]);
-      reporter_map_.erase(label);
-    }
-    reporter_map_[label] = reporter;
-  }
-  void AddReporter(const std::string& label, TypeReporter type) override {
-    switch(type) {
-    case TypeHistReporter: {
-      AddReporter(label, ReporterHandle(*factory_->BuildHistReporter(fg_write_lat_label, bytedance_tags_), type);
-    } break;
-    case TypeCountReporter: {
-      AddReporter(label, ReporterHandle(*factory_->BuildCountReporter(meta_alloc_qps_label, bytedance_tags_), type);
-    } break;
-    default:
-      AddReporter(nullptr, TypeNull);
-    }
-  }
-  void* GetReporter(const std::string& label) override {
-    return reporter_map_[label].handle_;
-  }
-  void DisposeReporter(const std::string& label) override {
-    // TODO : nothing.
-  }
-  virtual ~BDZenFSMetrics() {
-    for (auto reporter : reporter_map_) 
-      DisposeReporter(reporter);
-  }
-
- public:
-  BDZenFSMetrics(std::shared_ptr<MetricsReporterFactory> factory, std::string bytedance_tags, std::shared_ptr<Logger> logger):
-    bytedance_tags_(bytedance_tags),
-    factory_(new CurriedMetricsReporterFactory(factory, logger.get(), Env::Default())) {
-      AddReporter(fg_write_lat_label, TypeHistReporter);
-      AddReporter(bg_write_lat_label, TypeHistReporter);
-      AddReporter(read_lat_label, TypeHistReporter);
-      AddReporter(fg_sync_lat_label, TypeHistReporter);
-      AddReporter(bg_sync_lat_label, TypeHistReporter);
-      AddReporter(meta_alloc_lat_label, TypeHistReporter);
-      AddReporter(sync_metadata_lat_label, TypeHistReporter);
-      AddReporter(io_alloc_wal_lat_label, TypeHistReporter);
-      AddReporter(io_alloc_wal_actual_lat_label, TypeHistReporter);
-      AddReporter(io_alloc_non_wal_lat_label, TypeHistReporter);
-      AddReporter(io_alloc_non_wal_actual_lat_label, TypeHistReporter);
-      AddReporter(roll_lat_label, TypeHistReporter);
-
-      AddReporter(write_qps_label, TypeCountReporter);
-      AddReporter(read_qps_label, TypeCountReporter);
-      AddReporter(sync_qps_label, TypeCountReporter);
-      AddReporter(meta_alloc_qps_label, TypeCountReporter);
-      AddReporter(io_alloc_qps_label, TypeCountReporter);
-      AddReporter(roll_qps_label, TypeCountReporter);
-      AddReporter(write_throughput_label, TypeCountReporter);
-      AddReporter(roll_throughput_label, TypeCountReporter);
-
-      AddReporter(active_zones_label, TypeHistReporter);
-      AddReporter(open_zones_label, TypeHistReporter);
-      AddReporter(zbd_free_space_label, TypeHistReporter);
-      AddReporter(zbd_used_space_label, TypeHistReporter);
-      AddReporter(zbd_reclaimable_space_label, TypeHistReporter);
-      AddReporter(zbd_resetable_zones_label, TypeHistReporter);
-    }
-
 };
 
 }  // namespace ROCKSDB_NAMESPACE

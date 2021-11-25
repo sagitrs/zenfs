@@ -549,19 +549,23 @@ uint64_t ZonedBlockDevice::GetReclaimableSpace() {
 void ZonedBlockDevice::ReportSpaceUtilization() {
   auto free_space = GetFreeSpace() >> 30;
   Info(logger_, "zbd free space %lu GB \n", free_space);
-  metrics_->zbd_free_space_reporter_.AddRecord(free_space);
+  //metrics_->zbd_free_space_reporter_.AddRecord(free_space);
+  metrics_->AddRecord("zenfs_free_space", free_space);
 
   auto used_space = GetUsedSpace() >> 30;
   Info(logger_, "zbd used(valid) space %lu GB\n", used_space);
-  metrics_->zbd_used_space_reporter_.AddRecord(used_space);
+  //metrics_->zbd_used_space_reporter_.AddRecord(used_space);
+  metrics_->AddRecord("zenfs_used_space", used_space);
 
   auto reclaimable_space = GetReclaimableSpace() >> 30;
   Info(logger_, "zbd reclaimable space %lu GB\n", reclaimable_space);
-  metrics_->zbd_reclaimable_space_reporter_.AddRecord(reclaimable_space);
+  //metrics_->zbd_reclaimable_space_reporter_.AddRecord(reclaimable_space);
+  metrics_->AddRecord("zenfs_reclaimable_space", reclaimable_space);
 
   auto resetable_zones = GetResetableZones();
   Info(logger_, "zbd resetable zones %d\n", resetable_zones);
-  metrics_->zbd_resetable_zones_reporter_.AddRecord(resetable_zones);
+  //metrics_->zbd_resetable_zones_reporter_.AddRecord(resetable_zones);
+  metrics_->AddRecord("zenfs_resetable_zones", resetable_zones);
 
   // log garbage distribution
   // garbage percent: [0%, <10%, <20% ... <100%, 100%]
@@ -663,8 +667,9 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLif
 }
 
 Zone *ZonedBlockDevice::AllocateMetaZone() {
-  LatencyHistGuard guard(&(metrics_->meta_alloc_latency_reporter_));
-  metrics_->meta_alloc_qps_reporter_.AddCount(1);
+  //LatencyHistGuard guard(&(metrics_->meta_alloc_latency_reporter_));
+  //metrics_->meta_alloc_qps_reporter_.AddCount(1);
+  metrics_->AddRecord("zenfs_meta_alloc_qps", 1);
 
   for (const auto z : op_zones_) {
     if (z->IsEmpty()) {
@@ -676,8 +681,9 @@ Zone *ZonedBlockDevice::AllocateMetaZone() {
 }
 
 Zone *ZonedBlockDevice::AllocateSnapshotZone() {
-  LatencyHistGuard guard(&(metrics_->meta_alloc_latency_reporter_));
-  metrics_->meta_alloc_qps_reporter_.AddCount(1);
+  //LatencyHistGuard guard(&(metrics_->meta_alloc_latency_reporter_));
+  //metrics_->meta_alloc_qps_reporter_.AddCount(1);
+  metrics_->AddRecord("zenfs_meta_alloc_qps", 1);
 
   for (const auto z : snapshot_zones_) {
     if (z->IsEmpty()) {
@@ -709,10 +715,12 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
   // We reserve one more free zone for WAL files in case RocksDB delay close WAL files.
   int reserved_zones = 1;
 
-  auto *reporter =
-      is_wal ? &metrics_->io_alloc_wal_latency_reporter_ : &metrics_->io_alloc_non_wal_latency_reporter_;
-  LatencyHistGuard guard(reporter);
-  metrics_->io_alloc_qps_reporter_.AddCount(1);
+  //auto *reporter = is_wal ? 
+  //  &metrics_->io_alloc_wal_latency_reporter_ : 
+  //  &metrics_->io_alloc_non_wal_latency_reporter_;
+  //LatencyHistGuard guard(reporter);
+  //metrics_->io_alloc_qps_reporter_.AddCount(1);
+  metrics_->AddRecord("zenfs_io_alloc_qps", 1);
 
   auto t0 = std::chrono::system_clock::now();
 
@@ -812,8 +820,10 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
 
   auto t5 = std::chrono::system_clock::now();
 
-  metrics_->open_zones_reporter_.AddRecord(open_io_zones_);
-  metrics_->active_zones_reporter_.AddRecord(active_io_zones_);
+  //metrics_->open_zones_reporter_.AddRecord(open_io_zones_);
+  //metrics_->active_zones_reporter_.AddRecord(active_io_zones_);
+  metrics_->AddRecord("zenfs_open_zones", open_io_zones_);
+  metrics_->AddRecord("zenfs_active_zones", active_io_zones_);
 
   std::stringstream ss;
   ss << " is_wal = " << is_wal << " a/o zones " << active_io_zones_.load() << "," << open_io_zones_.load()

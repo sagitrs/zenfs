@@ -180,7 +180,7 @@ class ZonedBlockDevice {
   std::mutex metazone_reset_mtx_;
   std::condition_variable metazone_reset_cv_;
 
-  std::shared_ptr<BytedanceMetrics> metrics_;
+  std::shared_ptr<ZenFSMetrics> metrics_;
 
  public:
   explicit ZonedBlockDevice(std::string bdevname, std::shared_ptr<Logger> logger);

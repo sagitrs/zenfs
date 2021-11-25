@@ -41,7 +41,7 @@ int test_mkfs() {
   }
 
   ZenFS *zenFS;
-  auto metrics = std::make_shared<BytedanceMetrics>(std::make_shared<ByteDanceMetricsReporterFactory>(), "", logger);
+  auto metrics = std::make_shared<BDZenFSMetrics>(std::make_shared<ByteDanceMetricsReporterFactory>(), "", logger);
   zenFS = new ZenFS(zbd, FileSystem::Default(), logger, metrics);
 
   if (FLAGS_aux_path.back() != '/') {
