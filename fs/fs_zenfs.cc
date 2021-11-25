@@ -202,7 +202,7 @@ IOStatus ZenMetaLog::ReadRecord(Slice* record, std::string* scratch) {
 }
 
 ZenFS::ZenFS(ZonedBlockDevice* zbd, std::shared_ptr<FileSystem> aux_fs, std::shared_ptr<Logger> logger,
-             std::shared_ptr<BytedanceMetrics> metrics)
+             std::shared_ptr<BDZenFSMetrics> metrics)
     : FileSystemWrapper(aux_fs), zbd_(zbd), logger_(logger) {
   Info(logger_, "ZenFS initializing");
   Info(logger_, "ZenFS parameters: block device: %s, aux filesystem: %s", zbd_->GetFilename().c_str(),
@@ -271,8 +271,8 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
   IOStatus s;
   ZenMetaLog* old_snapshot_log = snapshot_log_.get();
   Zone* new_snapshot_zone;
-  LatencyHistGuard guard(&metrics_->roll_latency_reporter_);
-  metrics_->roll_qps_reporter_.AddCount(1);
+  LatencyHistGuard guard(&metrics_->GetReporter(metrics_->roll_lat_label));
+  metrics_->AddCount(metrics_->roll_qps_label, 1);// roll_qps_reporter_.AddCount(1);
 
   // Close and finish old zone at first place to release active zone resources.
   old_snapshot_log->GetZone()->Close();
@@ -306,8 +306,8 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
 
     auto new_snapshot_log_zone_size = snapshot_log_->GetZone()->wp_ - snapshot_log_->GetZone()->start_;
     Info(logger_, "Size of new snapshot log zone %ld\n", new_snapshot_log_zone_size);
-    metrics_->roll_throughput_reporter_.AddCount(new_snapshot_log_zone_size);
-
+    //metrics_->roll_throughput_reporter_.AddCount(new_snapshot_log_zone_size);
+    metrics_->AddCount(metrics_->roll_throughput_label, new_snapshot_log_zone_size);
     /* We've rolled successfully, we can reset the old zone now */
     old_snapshot_log->GetZone()->Reset();
   }
@@ -1166,6 +1166,11 @@ static std::string GetLogFilename(std::string bdev) {
 
   return ss.str();
 }
+
+class ZenFSMetrics {
+  static ReportQPS(metrics_name, value)
+  static ReportLatency(metrics_name)
+};
 
 Status NewZenFS(FileSystem** fs, const std::string& bdevname, std::string bytedance_tags,
                 std::shared_ptr<MetricsReporterFactory> metrics_factory) {
