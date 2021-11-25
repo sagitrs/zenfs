@@ -133,7 +133,7 @@ class ZenFS : public FileSystemWrapper {
 
   std::shared_ptr<Logger> GetLogger() { return logger_; }
 
-		std::shared_ptr<BytedanceMetrics> metrics_;
+		std::shared_ptr<BDZenFSMetrics> metrics_;
 
   struct MetadataWriter : public ZonedWritableFile::MetadataWriter {
     ZenFS* zenFS;
@@ -373,7 +373,6 @@ class ZenFS : public FileSystemWrapper {
   }
 
   std::vector<ZoneStat> GetStat();
-
   ZonedBlockDevice* GetZonedBlockDevice() { return zbd_; }
 };
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
