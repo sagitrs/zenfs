@@ -271,8 +271,10 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
   IOStatus s;
   ZenMetaLog* old_snapshot_log = snapshot_log_.get();
   Zone* new_snapshot_zone;
-  //LatencyHistGuard guard(&metrics_->GetReporter(metrics_->roll_lat_label));
-  metrics_->AddRecord("zenfs_roll_qps", 1);// roll_qps_reporter_.AddCount(1);
+
+  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_ROLL_QPS));
+  LatencyHistGuard guard(hist);
+  metrics_->ReportQPS(ZENFS_ROLL_QPS, 1);
 
   // Close and finish old zone at first place to release active zone resources.
   old_snapshot_log->GetZone()->Close();
@@ -306,8 +308,7 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
 
     auto new_snapshot_log_zone_size = snapshot_log_->GetZone()->wp_ - snapshot_log_->GetZone()->start_;
     Info(logger_, "Size of new snapshot log zone %ld\n", new_snapshot_log_zone_size);
-    //metrics_->roll_throughput_reporter_.AddCount(new_snapshot_log_zone_size);
-    metrics_->AddRecord("zenfs_roll_throughput", new_snapshot_log_zone_size);
+    metrics_->ReportThroughput(ZENFS_ROLL_THROUGHPUT, new_snapshot_log_zone_size);
     /* We've rolled successfully, we can reset the old zone now */
     old_snapshot_log->GetZone()->Reset();
   }
@@ -326,9 +327,10 @@ IOStatus ZenFS::WriteEndRecord(ZenMetaLog* meta_log) {
 IOStatus ZenFS::RollMetaZoneLocked(bool async) {
   Zone* new_op_zone = nullptr;
   IOStatus s;
-  //LatencyHistGuard guard(&metrics_->roll_latency_reporter_);
-  //metrics_->roll_qps_reporter_.AddCount(1);
-  metrics_->AddRecord("zenfs_roll_qps", 1);
+
+  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_ROLL_LATENCY));
+  LatencyHistGuard guard(hist);
+  metrics_->ReportQPS(ZENFS_ROLL_QPS, 1);
 
   // reserve write pointer to the old op log to close it later
   std::shared_ptr<ZenMetaLog> old_op_log = std::move(op_log_);
@@ -412,7 +414,8 @@ IOStatus ZenFS::PersistRecord(ZenMetaLog* meta_writer, std::string* record) {
 }
 
 IOStatus ZenFS::SyncFileMetadata(ZoneFile* zoneFile) {
-	//LatencyHistGuard guard(&metrics_->sync_metadata_reporter_);
+  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_METADATA_SYNC_LATENCY));
+	LatencyHistGuard guard(hist);
 
   std::string fileRecord;
   std::string output;

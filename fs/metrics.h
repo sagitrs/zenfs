@@ -3,240 +3,241 @@
 #include "rocksdb/env.h"
 #include "utilities/trace/bytedance_metrics_reporter.h"
 #include "zbd_stat.h"
-#include <map>
+#include <unordered_map>
 
 namespace ROCKSDB_NAMESPACE {
 
+enum BDZenFSMetricsHistograms : uint32_t {
+  ZENFS_HISTOGRAM_ENUM_MIN, 
+
+  ZENFS_FG_WRITE_LATENCY,
+  ZENFS_BG_WRITE_LATENCY,
+  
+  ZENFS_READ_LATENCY,
+  ZENFS_FG_SYNC_LATENCY,
+  ZENFS_BG_SYNC_LATENCY,
+  ZENFS_IO_ALLOC_WAL_LATENCY,
+  ZENFS_IO_ALLOC_NON_WAL_LATENCY,
+  ZENFS_IO_ALLOC_WAL_ACTUAL_LATENCY,
+  ZENFS_IO_ALLOC_NON_WAL_ACTUAL_LATENCY,
+  ZENFS_META_ALLOC_LATENCY,
+  ZENFS_METADATA_SYNC_LATENCY,
+  ZENFS_ROLL_LATENCY,
+
+  ZENFS_WRITE_QPS,
+  ZENFS_READ_QPS,
+  ZENFS_SYNC_QPS,
+  ZENFS_IO_ALLOC_QPS,
+  ZENFS_META_ALLOC_QPS,
+  ZENFS_ROLL_QPS,
+
+  ZENFS_WRITE_THROUGHPUT,
+  ZENFS_ROLL_THROUGHPUT,
+  
+  ZENFS_ACTIVE_ZONES,
+  ZENFS_OPEN_ZONES,
+  ZENFS_FREE_SPACE,
+  ZENFS_USED_SPACE,
+  ZENFS_RECLAIMABLE_SPACE,
+  ZENFS_RESETABLE_ZONES,
+
+  ZENFS_HISTOGRAM_ENUM_MAX,
+};
+
+enum BDZenFSMetricsReporterType : uint32_t {
+  ZENFS_REPORTER_TYPE_WITHOUT_CHECK = 0,
+  ZENFS_REPORTER_TYPE_GENERAL,
+  ZENFS_REPORTER_TYPE_LATENCY,    
+  ZENFS_REPORTER_TYPE_QPS,
+  ZENFS_REPORTER_TYPE_THROUGHPUT
+};
+
+struct ZenFSMetrics {
+public:
+  ZenFSMetrics() {}
+  virtual ~ZenFSMetrics() {}
+public:
+  virtual void AddReporter(uint32_t label, uint32_t type = 0) = 0;
+  virtual void Report(uint32_t label, size_t value, uint32_t type_check = 0) = 0;
+public:
+  virtual void ReportQPS(uint32_t label, size_t qps) = 0;
+  virtual void ReportThroughput(uint32_t label, size_t throughput) = 0;
+
+  virtual void ReportLatency(uint32_t label, size_t latency) = 0;
+  virtual void ReportGeneral(uint32_t label, size_t data) = 0;
+  virtual void* GetReporter(uint32_t label, uint32_t type_check = 0) = 0;
+  // and more
+};
+
+struct NoZenFSMetrics : public ZenFSMetrics {
+  NoZenFSMetrics() : ZenFSMetrics() {}
+  virtual ~NoZenFSMetrics() {}
+public:
+  virtual void AddReporter(uint32_t label, uint32_t type = 0) override {}
+  virtual void* GetReporter(uint32_t label, uint32_t type_check = 0) override { return nullptr; }
+  virtual void Report(uint32_t label, size_t value, uint32_t type_check = 0) override {}
+public:
+  virtual void ReportQPS(uint32_t label, size_t qps) override {}
+  virtual void ReportLatency(uint32_t label, size_t latency) override {}
+  virtual void ReportThroughput(uint32_t label, size_t throughput) override {}
+  virtual void ReportGeneral(uint32_t label, size_t data) override {}
+};
+//------------------------------
+const std::unordered_map<BDZenFSMetricsHistograms, std::string> BDZenFSHistogramsNameMap = {
+  {ZENFS_FG_WRITE_LATENCY, "zenfs_fg_write_latency"},
+  {ZENFS_BG_WRITE_LATENCY, "zenfs_bg_write_latency"},
+  {ZENFS_READ_LATENCY, "zenfs_read_latency"},
+  {ZENFS_FG_SYNC_LATENCY, "fg_zenfs_sync_latency"},
+  {ZENFS_BG_SYNC_LATENCY, "bg_zenfs_sync_latency"},
+  {ZENFS_IO_ALLOC_WAL_LATENCY, "zenfs_io_alloc_wal_latency"},
+  {ZENFS_IO_ALLOC_NON_WAL_LATENCY, "zenfs_io_alloc_non_wal_latency"},
+  {ZENFS_IO_ALLOC_WAL_ACTUAL_LATENCY, "zenfs_io_alloc_wal_actual_latency"},
+  {ZENFS_IO_ALLOC_NON_WAL_ACTUAL_LATENCY, "zenfs_io_alloc_non_wal_actual_latency"},
+  {ZENFS_META_ALLOC_LATENCY, "rzenfs_meta_alloc_latency"},
+  {ZENFS_METADATA_SYNC_LATENCY, "zenfs_metadata_sync_latency"},
+  {ZENFS_ROLL_LATENCY, "zenfs_roll_latency"},
+  {ZENFS_WRITE_QPS, "zenfs_write_qps"},
+  {ZENFS_READ_QPS, "zenfs_read_qps"},
+  {ZENFS_SYNC_QPS, "zenfs_sync_qps"},
+  {ZENFS_IO_ALLOC_QPS, "zenfs_io_alloc_qps"},
+  {ZENFS_META_ALLOC_QPS, "zenfs_meta_alloc_qps"},
+  {ZENFS_ROLL_QPS, "zenfs_roll_qps"},
+  {ZENFS_WRITE_THROUGHPUT, "rzenfs_write_throughput"},
+  {ZENFS_ROLL_THROUGHPUT, "zenfs_roll_throughput"},
+  {ZENFS_ACTIVE_ZONES, "zenfs_active_zones"},
+  {ZENFS_OPEN_ZONES, "zenfs_open_zones"},
+  {ZENFS_FREE_SPACE, "zenfs_free_space"},
+  {ZENFS_USED_SPACE, "zenfs_used_space"},
+  {ZENFS_RECLAIMABLE_SPACE, "zenfs_reclaimable_space"},
+  {ZENFS_RESETABLE_ZONES, "zenfs_resetable_zones"}
+};
+
+const std::unordered_map<BDZenFSMetricsHistograms, BDZenFSMetricsReporterType> BDZenFSHistogramsTypeMap = {
+  {ZENFS_FG_WRITE_LATENCY,            ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_BG_WRITE_LATENCY,            ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_READ_LATENCY,                ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_FG_SYNC_LATENCY,             ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_BG_SYNC_LATENCY,             ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_IO_ALLOC_WAL_LATENCY,        ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_IO_ALLOC_NON_WAL_LATENCY,    ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_IO_ALLOC_WAL_ACTUAL_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_IO_ALLOC_NON_WAL_ACTUAL_LATENCY,   ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_META_ALLOC_LATENCY,          ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_METADATA_SYNC_LATENCY,       ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_ROLL_LATENCY,                ZENFS_REPORTER_TYPE_LATENCY},
+  {ZENFS_WRITE_QPS,                   ZENFS_REPORTER_TYPE_QPS},
+  {ZENFS_READ_QPS,                    ZENFS_REPORTER_TYPE_QPS},
+  {ZENFS_SYNC_QPS,                    ZENFS_REPORTER_TYPE_QPS},
+  {ZENFS_IO_ALLOC_QPS,                ZENFS_REPORTER_TYPE_QPS},
+  {ZENFS_META_ALLOC_QPS,              ZENFS_REPORTER_TYPE_QPS},
+  {ZENFS_ROLL_QPS,                    ZENFS_REPORTER_TYPE_QPS},
+  {ZENFS_WRITE_THROUGHPUT,            ZENFS_REPORTER_TYPE_THROUGHPUT},
+  {ZENFS_ROLL_THROUGHPUT,             ZENFS_REPORTER_TYPE_THROUGHPUT},
+  {ZENFS_ACTIVE_ZONES,                ZENFS_REPORTER_TYPE_GENERAL},
+  {ZENFS_OPEN_ZONES,                  ZENFS_REPORTER_TYPE_GENERAL},
+  {ZENFS_FREE_SPACE,                  ZENFS_REPORTER_TYPE_GENERAL},
+  {ZENFS_USED_SPACE,                  ZENFS_REPORTER_TYPE_GENERAL},
+  {ZENFS_RECLAIMABLE_SPACE,           ZENFS_REPORTER_TYPE_GENERAL},
+  {ZENFS_RESETABLE_ZONES,             ZENFS_REPORTER_TYPE_GENERAL}
+};
 
 struct BDZenFSMetrics : public ZenFSMetrics {
 public:
   struct Reporter {
     void* handle_;
-    std::string type_;
-    Reporter(void* handle = nullptr, const std::string& type = "") 
+    BDZenFSMetricsReporterType type_;
+    Reporter(void* handle = nullptr, BDZenFSMetricsReporterType type = ZENFS_REPORTER_TYPE_WITHOUT_CHECK) 
       : handle_(handle), type_(type) {}
+    Reporter(const Reporter& r) : handle_(r.handle_), type_(r.type_) {}
+    ~Reporter() {}
+    HistReporterHandle* GetHistReporterHandle() const { return reinterpret_cast<HistReporterHandle*>(handle_); }
+    CountReporterHandle* GetCountReporterHandle() const { return reinterpret_cast<CountReporterHandle*>(handle_); }
   };
-public:
+private:
   std::string bytedance_tags_;
   std::shared_ptr<CurriedMetricsReporterFactory> factory_;
-  std::map<std::string, Reporter> reporter_map_;
+  std::unordered_map<BDZenFSMetricsHistograms, Reporter> reporter_map_;
+private:
+  virtual void AddReporter_(BDZenFSMetricsHistograms h, const Reporter& reporter) {
+    assert(reporter_map_.find(h) == reporter_map_.end());
+    reporter_map_[h] = reporter;
+  }
+  public:
+  virtual void AddReporter(uint32_t label_uint, uint32_t type_uint = 0) override {
+    BDZenFSMetricsHistograms label = static_cast<BDZenFSMetricsHistograms>(label_uint);
+    BDZenFSMetricsReporterType type = static_cast<BDZenFSMetricsReporterType>(type_uint);
+    assert(BDZenFSHistogramsNameMap.find(label) != BDZenFSHistogramsNameMap.end());
+    const std::string& name = BDZenFSHistogramsNameMap.find(label)->second;
+    switch (type) {
+    case ZENFS_REPORTER_TYPE_GENERAL:
+    case ZENFS_REPORTER_TYPE_LATENCY: {
+      AddReporter_(label, 
+        Reporter(factory_->BuildHistReporter(name, bytedance_tags_), type));
+    } break;
+    case ZENFS_REPORTER_TYPE_QPS:
+    case ZENFS_REPORTER_TYPE_THROUGHPUT: {
+      AddReporter_(label, 
+        Reporter(factory_->BuildCountReporter(name, bytedance_tags_), type));
+    } break;
+    default: {
+      assert(false);
+      AddReporter_(label, Reporter(nullptr, type));
+    }
+    }
+  }
+  virtual void Report(uint32_t label, size_t value, uint32_t type_check = 0) override {
+    auto p = reporter_map_.find(static_cast<BDZenFSMetricsHistograms>(label));
+    assert ( p != reporter_map_.end());
+    Reporter& r = p->second;
+    if (type_check != 0) {
+      assert(static_cast<BDZenFSMetricsReporterType>(type_check) == r.type_);
+    }
+    switch (r.type_) {
+    case ZENFS_REPORTER_TYPE_GENERAL:
+    case ZENFS_REPORTER_TYPE_LATENCY: {
+      r.GetHistReporterHandle()->AddRecord(value);
+    } break;
+    case ZENFS_REPORTER_TYPE_QPS:
+    case ZENFS_REPORTER_TYPE_THROUGHPUT: {
+      r.GetCountReporterHandle()->AddCount(value);
+    } break;
+    default: {
+      assert(false);
+    }
+    }
+  }
+  virtual void* GetReporter(uint32_t label, uint32_t type_check = 0) override {
+    auto p = reporter_map_.find(static_cast<BDZenFSMetricsHistograms>(label));
+    assert (p != reporter_map_.end());
+    Reporter& r = p->second;
+    if (type_check != 0) {
+      assert(static_cast<BDZenFSMetricsReporterType>(type_check) == r.type_);
+    }
+    return r.handle_;
+  }
 public:
-  virtual void AddReporter(const std::string& label, const Reporter& reporter) {
-    assert(reporter_map_.find(label) == reporter_map_.end());
-    reporter_map_[label] = reporter;
+  virtual void ReportQPS(uint32_t label, size_t qps) override { 
+    Report(label, qps, ZENFS_REPORTER_TYPE_QPS); 
   }
-  virtual void AddReporter(const std::string& label, const std::string& type_string = "") override {
-    if (type_string == type_hist_reporter) {
-      AddReporter(label, Reporter(factory_->BuildHistReporter(fg_write_lat_label, bytedance_tags_), type_string));
-    } else if (type_string == type_count_reporter) {
-      AddReporter(label, Reporter(factory_->BuildCountReporter(meta_alloc_qps_label, bytedance_tags_), type_string));
-    } else {
-      assert(false);
-      AddReporter(label, Reporter(nullptr, ""));
-    }
+  virtual void ReportLatency(uint32_t label, size_t latency) override {
+    Report(label, latency, ZENFS_REPORTER_TYPE_LATENCY);
   }
-
-public: // For Record Reporter:
-  virtual void AddRecord(const std::string& label, size_t size) override {
-    assert(reporter_map_.find(label) != reporter_map_.end());
-    Reporter rep = reporter_map_[label];
-    if (rep.type_ == type_hist_reporter) {
-      reinterpret_cast<HistReporterHandle*>(rep.handle_)->AddRecord(size);
-    } else if (rep.type_ == type_count_reporter) {
-      reinterpret_cast<CountReporterHandle*>(rep.handle_)->AddCount(size);
-    } else {
-      assert(false);
-    }
+  virtual void ReportThroughput(uint32_t label, size_t throughput) override {
+    Report(label, throughput, ZENFS_REPORTER_TYPE_THROUGHPUT);
   }
-  virtual void* GetRecord(const std::string& label) override {
-    assert(false);
-    return reporter_map_[label].handle_;
+  virtual void ReportGeneral(uint32_t label, size_t value) override {
+    Report(label, value, ZENFS_REPORTER_TYPE_GENERAL);
   }
-    
-  virtual ~BDZenFSMetrics() {}
-
+ 
  public:
   BDZenFSMetrics(std::shared_ptr<MetricsReporterFactory> factory, std::string bytedance_tags, std::shared_ptr<Logger> logger):
     ZenFSMetrics(),
     bytedance_tags_(bytedance_tags),
     factory_(new CurriedMetricsReporterFactory(factory, logger.get(), Env::Default())) {
-      AddReporter(fg_write_lat_label, type_hist_reporter);
-      AddReporter(bg_write_lat_label, type_hist_reporter);
-      AddReporter(read_lat_label, type_hist_reporter);
-      AddReporter(fg_sync_lat_label, type_hist_reporter);
-      AddReporter(bg_sync_lat_label, type_hist_reporter);
-      AddReporter(meta_alloc_lat_label, type_hist_reporter);
-      AddReporter(sync_metadata_lat_label, type_hist_reporter);
-      AddReporter(io_alloc_wal_lat_label, type_hist_reporter);
-      AddReporter(io_alloc_wal_actual_lat_label, type_hist_reporter);
-      AddReporter(io_alloc_non_wal_lat_label, type_hist_reporter);
-      AddReporter(io_alloc_non_wal_actual_lat_label, type_hist_reporter);
-      AddReporter(roll_lat_label, type_hist_reporter);
-
-      AddReporter(write_qps_label, type_count_reporter);
-      AddReporter(read_qps_label, type_count_reporter);
-      AddReporter(sync_qps_label, type_count_reporter);
-      AddReporter(meta_alloc_qps_label, type_count_reporter);
-      AddReporter(io_alloc_qps_label, type_count_reporter);
-      AddReporter(roll_qps_label, type_count_reporter);
-      AddReporter(write_throughput_label, type_count_reporter);
-      AddReporter(roll_throughput_label, type_count_reporter);
-
-      AddReporter(active_zones_label, type_hist_reporter);
-      AddReporter(open_zones_label, type_hist_reporter);
-      AddReporter(zbd_free_space_label, type_hist_reporter);
-      AddReporter(zbd_used_space_label, type_hist_reporter);
-      AddReporter(zbd_reclaimable_space_label, type_hist_reporter);
-      AddReporter(zbd_resetable_zones_label, type_hist_reporter);
+      for (auto &h : BDZenFSHistogramsTypeMap) 
+        AddReporter(static_cast<uint32_t>(h.first), static_cast<uint32_t>(h.second));
     }
-
-public:
-  std::string type_hist_reporter = "zenfs_type_hist_reporter";
-  std::string type_count_reporter = "zenfs_type_count_reporter";
-
-  std::string fg_write_lat_label = "zenfs_fg_write_latency";
-  std::string bg_write_lat_label = "zenfs_bg_write_latency";
-
-  std::string read_lat_label = "zenfs_read_latency";
-  std::string fg_sync_lat_label = "fg_zenfs_sync_latency";
-  std::string bg_sync_lat_label = "bg_zenfs_sync_latency";
-  std::string io_alloc_wal_lat_label = "zenfs_io_alloc_wal_latency";
-  std::string io_alloc_non_wal_lat_label = "zenfs_io_alloc_non_wal_latency";
-  std::string io_alloc_wal_actual_lat_label = "zenfs_io_alloc_wal_actual_latency";
-  std::string io_alloc_non_wal_actual_lat_label = "zenfs_io_alloc_non_wal_actual_latency";
-  std::string meta_alloc_lat_label = "zenfs_meta_alloc_latency";
-  std::string sync_metadata_lat_label = "zenfs_metadata_sync_latency";
-  std::string roll_lat_label = "zenfs_roll_latency";
-
-  std::string write_qps_label = "zenfs_write_qps";
-  std::string read_qps_label = "zenfs_read_qps";
-  std::string sync_qps_label = "zenfs_sync_qps";
-  std::string io_alloc_qps_label = "zenfs_io_alloc_qps";
-  std::string meta_alloc_qps_label = "zenfs_meta_alloc_qps";
-  std::string roll_qps_label = "zenfs_roll_qps";
-
-  std::string write_throughput_label = "zenfs_write_throughput";
-  std::string roll_throughput_label = "zenfs_roll_throughput";
-
-  std::string active_zones_label = "zenfs_active_zones";
-  std::string open_zones_label = "zenfs_open_zones";
-  std::string zbd_free_space_label = "zenfs_free_space";
-  std::string zbd_used_space_label = "zenfs_used_space";
-  std::string zbd_reclaimable_space_label = "zenfs_reclaimable_space";
-  std::string zbd_resetable_zones_label = "zenfs_resetable_zones";
-};
-
-// We need to report all metrics here, don't initialize this in other places.
-class OldBytedanceMetrics {
- public:
-  OldBytedanceMetrics(std::shared_ptr<MetricsReporterFactory> factory, std::string bytedance_tags,
-                   std::shared_ptr<Logger> logger):
-        bytedance_tags_(bytedance_tags),
-        factory_(new CurriedMetricsReporterFactory(factory, logger.get(), Env::Default())),
-
-        fg_write_latency_reporter_(*factory_->BuildHistReporter(fg_write_lat_label, bytedance_tags_)),
-        bg_write_latency_reporter_(*factory_->BuildHistReporter(bg_write_lat_label, bytedance_tags_)),
-        read_latency_reporter_(*factory_->BuildHistReporter(read_lat_label, bytedance_tags_)),
-        fg_sync_latency_reporter_(*factory_->BuildHistReporter(fg_sync_lat_label, bytedance_tags_)),
-        bg_sync_latency_reporter_(*factory_->BuildHistReporter(bg_sync_lat_label, bytedance_tags_)),
-        meta_alloc_latency_reporter_(*factory_->BuildHistReporter(meta_alloc_lat_label, bytedance_tags_)),
-        sync_metadata_reporter_(*factory_->BuildHistReporter(sync_metadata_lat_label, bytedance_tags_)),
-        io_alloc_wal_latency_reporter_(*factory_->BuildHistReporter(io_alloc_wal_lat_label, bytedance_tags_)),
-        io_alloc_wal_actual_latency_reporter_(
-            *factory_->BuildHistReporter(io_alloc_wal_actual_lat_label, bytedance_tags_)),
-        io_alloc_non_wal_latency_reporter_(
-            *factory_->BuildHistReporter(io_alloc_non_wal_lat_label, bytedance_tags_)),
-        io_alloc_non_wal_actual_latency_reporter_(
-            *factory_->BuildHistReporter(io_alloc_non_wal_actual_lat_label, bytedance_tags_)),
-        roll_latency_reporter_(*factory_->BuildHistReporter(roll_lat_label, bytedance_tags_)),
-        write_qps_reporter_(*factory_->BuildCountReporter(write_qps_label, bytedance_tags_)),
-        read_qps_reporter_(*factory_->BuildCountReporter(read_qps_label, bytedance_tags_)),
-        sync_qps_reporter_(*factory_->BuildCountReporter(sync_qps_label, bytedance_tags_)),
-        meta_alloc_qps_reporter_(*factory_->BuildCountReporter(meta_alloc_qps_label, bytedance_tags_)),
-        io_alloc_qps_reporter_(*factory_->BuildCountReporter(io_alloc_qps_label, bytedance_tags_)),
-        roll_qps_reporter_(*factory_->BuildCountReporter(roll_qps_label, bytedance_tags_)),
-        write_throughput_reporter_(*factory_->BuildCountReporter(write_throughput_label, bytedance_tags_)),
-        roll_throughput_reporter_(*factory_->BuildCountReporter(roll_throughput_label, bytedance_tags_)),
-        active_zones_reporter_(*factory_->BuildHistReporter(active_zones_label, bytedance_tags_)),
-        open_zones_reporter_(*factory_->BuildHistReporter(open_zones_label, bytedance_tags_)),
-        zbd_free_space_reporter_(*factory_->BuildHistReporter(zbd_free_space_label, bytedance_tags_)),
-        zbd_used_space_reporter_(*factory_->BuildHistReporter(zbd_used_space_label, bytedance_tags_)),
-        zbd_reclaimable_space_reporter_(
-            *factory_->BuildHistReporter(zbd_reclaimable_space_label, bytedance_tags_)),
-        zbd_resetable_zones_reporter_(*factory_->BuildHistReporter(zbd_resetable_zones_label, bytedance_tags_)) {}
-
- public:
-  std::string fg_write_lat_label = "zenfs_fg_write_latency";
-  std::string bg_write_lat_label = "zenfs_bg_write_latency";
-
-  std::string read_lat_label = "zenfs_read_latency";
-  std::string fg_sync_lat_label = "fg_zenfs_sync_latency";
-  std::string bg_sync_lat_label = "bg_zenfs_sync_latency";
-  std::string io_alloc_wal_lat_label = "zenfs_io_alloc_wal_latency";
-  std::string io_alloc_non_wal_lat_label = "zenfs_io_alloc_non_wal_latency";
-  std::string io_alloc_wal_actual_lat_label = "zenfs_io_alloc_wal_actual_latency";
-  std::string io_alloc_non_wal_actual_lat_label = "zenfs_io_alloc_non_wal_actual_latency";
-  std::string meta_alloc_lat_label = "zenfs_meta_alloc_latency";
-  std::string sync_metadata_lat_label = "zenfs_metadata_sync_latency";
-  std::string roll_lat_label = "zenfs_roll_latency";
-
-  std::string write_qps_label = "zenfs_write_qps";
-  std::string read_qps_label = "zenfs_read_qps";
-  std::string sync_qps_label = "zenfs_sync_qps";
-  std::string io_alloc_qps_label = "zenfs_io_alloc_qps";
-  std::string meta_alloc_qps_label = "zenfs_meta_alloc_qps";
-  std::string roll_qps_label = "zenfs_roll_qps";
-
-  std::string write_throughput_label = "zenfs_write_throughput";
-  std::string roll_throughput_label = "zenfs_roll_throughput";
-
-  std::string active_zones_label = "zenfs_active_zones";
-  std::string open_zones_label = "zenfs_open_zones";
-  std::string zbd_free_space_label = "zenfs_free_space";
-  std::string zbd_used_space_label = "zenfs_used_space";
-  std::string zbd_reclaimable_space_label = "zenfs_reclaimable_space";
-  std::string zbd_resetable_zones_label = "zenfs_resetable_zones";
-
- public:
-  std::string bytedance_tags_;
-  std::shared_ptr<CurriedMetricsReporterFactory> factory_;
-
-  using LatencyReporter = HistReporterHandle &;
-
-  // All reporters
-  LatencyReporter fg_write_latency_reporter_;
-  LatencyReporter bg_write_latency_reporter_;
-
-  LatencyReporter read_latency_reporter_;
-  LatencyReporter fg_sync_latency_reporter_;
-  LatencyReporter bg_sync_latency_reporter_;
-  LatencyReporter meta_alloc_latency_reporter_;
-  LatencyReporter sync_metadata_reporter_;
-  LatencyReporter io_alloc_wal_latency_reporter_;
-  LatencyReporter io_alloc_wal_actual_latency_reporter_;
-  LatencyReporter io_alloc_non_wal_latency_reporter_;
-  LatencyReporter io_alloc_non_wal_actual_latency_reporter_;
-  LatencyReporter roll_latency_reporter_;
-
-  using QPSReporter = CountReporterHandle &;
-  QPSReporter write_qps_reporter_;
-  QPSReporter read_qps_reporter_;
-  QPSReporter sync_qps_reporter_;
-  QPSReporter meta_alloc_qps_reporter_;
-  QPSReporter io_alloc_qps_reporter_;
-  QPSReporter roll_qps_reporter_;
-
-  using ThroughputReporter = CountReporterHandle &;
-  ThroughputReporter write_throughput_reporter_;
-  ThroughputReporter roll_throughput_reporter_;
-
-  using DataReporter = HistReporterHandle &;
-  DataReporter active_zones_reporter_;
-  DataReporter open_zones_reporter_;
-  DataReporter zbd_free_space_reporter_;
-  DataReporter zbd_used_space_reporter_;
-  DataReporter zbd_reclaimable_space_reporter_;
-  DataReporter zbd_resetable_zones_reporter_;
+  virtual ~BDZenFSMetrics() {}
 };
 
 

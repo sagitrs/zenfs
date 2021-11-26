@@ -133,7 +133,7 @@ class ZenFS : public FileSystemWrapper {
 
   std::shared_ptr<Logger> GetLogger() { return logger_; }
 
-		std::shared_ptr<ZenFSMetrics> metrics_;
+	std::shared_ptr<ZenFSMetrics> metrics_;
 
   struct MetadataWriter : public ZonedWritableFile::MetadataWriter {
     ZenFS* zenFS;

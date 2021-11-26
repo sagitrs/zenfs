@@ -265,8 +265,9 @@ ZoneExtent* ZoneFile::GetExtent(uint64_t file_offset, uint64_t* dev_offset) {
 
 IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
                                   char* scratch, bool direct) {
-  //LatencyHistGuard guard(&zbd_->metrics_->read_latency_reporter_);
-  zbd_->metrics_->AddRecord("zenfs_read_qps", 1);
+  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(zbd_->metrics_->GetReporter(ZENFS_READ_LATENCY));
+  LatencyHistGuard guard(hist);
+  zbd_->metrics_->ReportQPS(ZENFS_READ_QPS, 1);
 
 
   int f = zbd_->GetReadFD();
@@ -496,10 +497,10 @@ IOStatus ZonedWritableFile::Truncate(uint64_t size,
 IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
-  //LatencyHistGuard guard(zoneFile_->is_wal_
-  //                       ? zoneFile_->GetMetrics()->GetRecord("fg_zenfs_sync_latency")
-  //                       : zoneFile_->GetMetrics()->GetRecord("bg_zenfs_sync_latency"));
-  zoneFile_->GetMetrics()->AddRecord("zenfs_sync_qps", 1);
+  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(zoneFile_->GetMetrics()->GetReporter(
+    zoneFile_->is_wal_ ? ZENFS_FG_SYNC_LATENCY : ZENFS_BG_SYNC_LATENCY));
+  LatencyHistGuard guard(hist);
+  zoneFile_->GetMetrics()->ReportQPS(ZENFS_SYNC_QPS, 1);
 
   buffer_mtx_.lock();
   uint64_t wp0 = wp;
@@ -643,12 +644,12 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                    const IOOptions& /*options*/,
                                    IODebugContext* /*dbg*/) {
   IOStatus s;
-  zoneFile_->GetMetrics()->AddRecord("zenfs_write_qps", 1);
-  zoneFile_->GetMetrics()->AddRecord("zenfs_write_throughput", 1);
-  //LatencyHistGuard guard(zoneFile_->is_wal_
-  //                       ? zoneFile_->GetMetrics()->GetRecord("zenfs_fg_write_latency")
-  //                       : zoneFile_->GetMetrics()->GetRecord("zenfs_bg_write_latency"));
-
+  zoneFile_->GetMetrics()->ReportQPS(ZENFS_WRITE_QPS, 1);
+  zoneFile_->GetMetrics()->ReportThroughput(ZENFS_WRITE_THROUGHPUT, 1);
+  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(zoneFile_->GetMetrics()->GetReporter(
+    zoneFile_->is_wal_ ? ZENFS_FG_WRITE_LATENCY : ZENFS_BG_WRITE_LATENCY));
+  LatencyHistGuard guard(hist);
+  
   if (buffered) {
     buffer_mtx_.lock();
     s = BufferedWrite(data);
