@@ -265,8 +265,7 @@ ZoneExtent* ZoneFile::GetExtent(uint64_t file_offset, uint64_t* dev_offset) {
 
 IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
                                   char* scratch, bool direct) {
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(zbd_->metrics_->GetReporter(ZENFS_READ_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(zbd_->metrics_, ZENFS_READ_LATENCY, Env::Default());
   zbd_->metrics_->ReportQPS(ZENFS_READ_QPS, 1);
 
 
@@ -497,9 +496,7 @@ IOStatus ZonedWritableFile::Truncate(uint64_t size,
 IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(zoneFile_->GetMetrics()->GetReporter(
-    zoneFile_->is_wal_ ? ZENFS_FG_SYNC_LATENCY : ZENFS_BG_SYNC_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(zoneFile_->GetMetrics(), zoneFile_->is_wal_ ? ZENFS_FG_SYNC_LATENCY : ZENFS_BG_SYNC_LATENCY, Env::Default());
   zoneFile_->GetMetrics()->ReportQPS(ZENFS_SYNC_QPS, 1);
 
   buffer_mtx_.lock();
@@ -646,9 +643,7 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
   IOStatus s;
   zoneFile_->GetMetrics()->ReportQPS(ZENFS_WRITE_QPS, 1);
   zoneFile_->GetMetrics()->ReportThroughput(ZENFS_WRITE_THROUGHPUT, 1);
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(zoneFile_->GetMetrics()->GetReporter(
-    zoneFile_->is_wal_ ? ZENFS_FG_WRITE_LATENCY : ZENFS_BG_WRITE_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(zoneFile_->GetMetrics(), zoneFile_->is_wal_ ? ZENFS_FG_WRITE_LATENCY : ZENFS_BG_WRITE_LATENCY, Env::Default());
   
   if (buffered) {
     buffer_mtx_.lock();

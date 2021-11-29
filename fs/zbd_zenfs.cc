@@ -32,6 +32,7 @@
 #include "io_zenfs.h"
 #include "rocksdb/env.h"
 #include "utilities/trace/bytedance_metrics_reporter.h"
+#include "utilities/trace/bytedance_metrics_histogram.h"
 
 #define KB (1024)
 #define MB (1024 * KB)
@@ -663,8 +664,7 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime, Env::WriteLif
 }
 
 Zone *ZonedBlockDevice::AllocateMetaZone() {
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_META_ALLOC_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_META_ALLOC_LATENCY, Env::Default());
   metrics_->ReportQPS(ZENFS_META_ALLOC_QPS, 1);
 
   for (const auto z : op_zones_) {
@@ -677,8 +677,7 @@ Zone *ZonedBlockDevice::AllocateMetaZone() {
 }
 
 Zone *ZonedBlockDevice::AllocateSnapshotZone() {
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_META_ALLOC_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_META_ALLOC_LATENCY, Env::Default());
   metrics_->ReportQPS(ZENFS_META_ALLOC_QPS, 1);
 
   for (const auto z : snapshot_zones_) {
@@ -711,9 +710,7 @@ Zone *ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime, bool 
   // We reserve one more free zone for WAL files in case RocksDB delay close WAL files.
   int reserved_zones = 1;
 
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(
-    is_wal ? ZENFS_IO_ALLOC_WAL_LATENCY : ZENFS_IO_ALLOC_NON_WAL_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(metrics_, is_wal ? ZENFS_IO_ALLOC_WAL_LATENCY : ZENFS_IO_ALLOC_NON_WAL_LATENCY, Env::Default());
   metrics_->ReportQPS(ZENFS_IO_ALLOC_QPS, 1);
 
   auto t0 = std::chrono::system_clock::now();

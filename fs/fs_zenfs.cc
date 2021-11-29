@@ -272,8 +272,7 @@ IOStatus ZenFS::RollSnapshotZone(std::string* snapshot) {
   ZenMetaLog* old_snapshot_log = snapshot_log_.get();
   Zone* new_snapshot_zone;
 
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_ROLL_QPS));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_ROLL_QPS, Env::Default());
   metrics_->ReportQPS(ZENFS_ROLL_QPS, 1);
 
   // Close and finish old zone at first place to release active zone resources.
@@ -328,8 +327,7 @@ IOStatus ZenFS::RollMetaZoneLocked(bool async) {
   Zone* new_op_zone = nullptr;
   IOStatus s;
 
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_ROLL_LATENCY));
-  LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_ROLL_LATENCY, Env::Default());
   metrics_->ReportQPS(ZENFS_ROLL_QPS, 1);
 
   // reserve write pointer to the old op log to close it later
@@ -414,8 +412,7 @@ IOStatus ZenFS::PersistRecord(ZenMetaLog* meta_writer, std::string* record) {
 }
 
 IOStatus ZenFS::SyncFileMetadata(ZoneFile* zoneFile) {
-  HistReporterHandle* hist = reinterpret_cast<HistReporterHandle*>(metrics_->GetReporter(ZENFS_METADATA_SYNC_LATENCY));
-	LatencyHistGuard guard(hist);
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_METADATA_SYNC_LATENCY, Env::Default());
 
   std::string fileRecord;
   std::string output;
