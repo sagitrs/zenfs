@@ -30,6 +30,8 @@
 #include "util/coding.h"
 #include "zbd_zenfs.h"
 
+#include "utilities/trace/bytedance_metrics_histogram.h"
+
 namespace ROCKSDB_NAMESPACE {
 
 Status ZoneExtent::DecodeFrom(Slice* input) {

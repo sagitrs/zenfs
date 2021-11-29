@@ -25,6 +25,7 @@
 #include "util/coding.h"
 #include "util/crc32c.h"
 #include "utilities/trace/bytedance_metrics_reporter.h"
+#include "utilities/trace/bytedance_metrics_histogram.h"
 
 #define DEFAULT_ZENV_LOG_PATH "/tmp/"
 

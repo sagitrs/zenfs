@@ -21,6 +21,7 @@
 #include "fs/fs_zenfs.h"
 #include "fs/metrics.h"
 #include "utilities/trace/bytedance_metrics_reporter.h"
+#include "utilities/trace/bytedance_metrics_histogram.h"
 
 using GFLAGS_NAMESPACE::ParseCommandLineFlags;
 using GFLAGS_NAMESPACE::RegisterFlagValidator;

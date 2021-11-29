@@ -18,6 +18,7 @@
 #include <util/testutil.h>
 
 #include "fs/fs_zenfs.h"
+#include "utilities/trace/bytedance_metrics_histogram.h"
 
 using GFLAGS_NAMESPACE::ParseCommandLineFlags;
 using GFLAGS_NAMESPACE::RegisterFlagValidator;
