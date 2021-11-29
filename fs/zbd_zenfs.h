@@ -28,7 +28,6 @@
 #include <utility>
 #include <vector>
 
-#include "metrics.h"
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
 #include "rocksdb/metrics_reporter.h"
