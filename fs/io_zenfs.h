@@ -30,10 +30,10 @@ namespace ROCKSDB_NAMESPACE {
 class ZoneExtent {
  public:
   uint64_t start_;
-  uint32_t length_;
+  uint64_t length_;
   Zone* zone_;
 
-  explicit ZoneExtent(uint64_t start, uint32_t length, Zone* zone);
+  explicit ZoneExtent(uint64_t start, uint64_t length, Zone* zone);
   Status DecodeFrom(Slice* input);
   void EncodeTo(std::string* output);
   void EncodeJson(std::ostream& json_stream);
@@ -103,6 +103,7 @@ class ZoneFile {
   void ReleaseActiveZone();
   void SetActiveZone(Zone* zone);
   IOStatus CloseActiveZone();
+  std::shared_ptr<ZenFSMetrics> GetZBDMetrics() { return zbd_->GetMetrics(); }
 };
 
 class ZonedWritableFile : public FSWritableFile {

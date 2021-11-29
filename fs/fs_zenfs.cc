@@ -18,7 +18,9 @@
 #include <utility>
 #include <vector>
 
+#include "metrics_sample.h"
 #include "rocksdb/utilities/object_registry.h"
+#include "snapshot.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
 
@@ -280,9 +282,18 @@ IOStatus ZenFS::RollMetaZoneLocked() {
   Zone* new_meta_zone = nullptr;
   IOStatus s;
 
+  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(), ZENFS_ROLL_LATENCY,
+                                 Env::Default());
+  zbd_->GetMetrics()->ReportQPS(ZENFS_ROLL_QPS, 1);
+
   IOStatus status = zbd_->AllocateMetaZone(&new_meta_zone);
   if (!status.ok()) return status;
 
+  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(), ZENFS_ROLL_LATENCY,
+                                 Env::Default());
+  zbd_->GetMetrics()->ReportQPS(ZENFS_ROLL_QPS, 1);
+
+  new_meta_zone = zbd_->AllocateMetaZone();
   if (!new_meta_zone) {
     assert(false);  // TMP
     Error(logger_, "Out of metadata zones, we should go to read only now.");
@@ -357,10 +368,15 @@ IOStatus ZenFS::PersistRecord(std::string record) {
 IOStatus ZenFS::SyncFileMetadata(std::shared_ptr<ZoneFile> zoneFile) {
   std::string fileRecord;
   std::string output;
-
   IOStatus s;
-
+  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(),
+                                 ZENFS_METADATA_SYNC_LATENCY, Env::Default());
   std::lock_guard<std::mutex> lock(files_mtx_);
+  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(),
+                                 ZENFS_METADATA_SYNC_LATENCY, Env::Default());
+
+  files_mtx_.lock();
+
   zoneFile->SetFileModificationTime(time(0));
   PutFixed32(&output, kFileUpdate);
   zoneFile->EncodeUpdateTo(&fileRecord);
@@ -1083,7 +1099,8 @@ static std::string GetLogFilename(std::string bdev) {
 }
 #endif
 
-Status NewZenFS(FileSystem** fs, const std::string& bdevname) {
+Status NewZenFS(FileSystem** fs, const std::string& bdevname,
+                std::shared_ptr<ZenFSMetrics> metrics) {
   std::shared_ptr<Logger> logger;
   Status s;
 
@@ -1096,7 +1113,7 @@ Status NewZenFS(FileSystem** fs, const std::string& bdevname) {
   }
 #endif
 
-  ZonedBlockDevice* zbd = new ZonedBlockDevice(bdevname, logger);
+  ZonedBlockDevice* zbd = new ZonedBlockDevice(bdevname, logger, metrics);
   IOStatus zbd_status = zbd->Open(false, true);
   if (!zbd_status.ok()) {
     Error(logger, "mkfs: Failed to open zoned block device: %s",
@@ -1165,6 +1182,18 @@ std::map<std::string, std::string> ListZenFileSystems() {
   return zenFileSystems;
 }
 
+void ZenFS::GetZoneSnapshot(std::vector<ZoneSnapshot>& zones) {
+  zbd_->GetZonesSnapshot(zones);
+}
+
+void ZenFS::GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files) {
+  files_mtx_.lock();
+  for (auto& file_it : files_) {
+    zone_files.emplace_back(*file_it.second);
+  }
+  files_mtx_.unlock();
+}
+
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;
 
 FactoryFunc<FileSystem> zenfs_filesystem_reg =
@@ -1208,7 +1237,8 @@ FactoryFunc<FileSystem> zenfs_filesystem_reg =
 #include "rocksdb/env.h"
 
 namespace ROCKSDB_NAMESPACE {
-Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/) {
+Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/,
+                ZenFSMetrics* /*metrics*/) {
   return Status::NotSupported("Not built with ZenFS support\n");
 }
 std::map<std::string, std::string> ListZenFileSystems() {
