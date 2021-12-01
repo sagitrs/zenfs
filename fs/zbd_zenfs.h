@@ -30,6 +30,7 @@
 namespace ROCKSDB_NAMESPACE {
 
 class ZonedBlockDevice;
+class ZoneSnapshot;
 
 class Zone {
   ZonedBlockDevice *zbd_;
@@ -145,6 +146,7 @@ class ZonedBlockDevice {
   std::mutex zone_resources_mtx_; /* Protects active/open io zones */
 
   std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
+  void GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot);
 
  private:
   std::string ErrorToString(int err);

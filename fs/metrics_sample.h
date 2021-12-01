@@ -1,3 +1,7 @@
+//  SPDX-License-Identifier: Apache License 2.0 OR GPL-2.0
+//  Written by Liu Ruicheng <sagitrs67@gmail.com>
+
+#pragma once
 #include <iostream>
 #include <unordered_map>
 

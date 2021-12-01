@@ -20,6 +20,7 @@
 
 #include "metrics_sample.h"
 #include "rocksdb/utilities/object_registry.h"
+#include "snapshot.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
 
@@ -1116,11 +1117,6 @@ Status NewZenFS(FileSystem** fs, const std::string& bdevname,
   return Status::OK();
 }
 
-Status NewZenFS(FileSystem** fs, const std::string& bdevname) {
-  auto metrics = std::make_shared<NoZenFSMetrics>();
-  return NewZenFS(fs, bdevname, metrics);
-}
-
 std::map<std::string, std::string> ListZenFileSystems() {
   std::map<std::string, std::string> zenFileSystems;
   auto closedirDeleter = [](DIR* d) {
@@ -1171,6 +1167,18 @@ std::map<std::string, std::string> ListZenFileSystems() {
   return zenFileSystems;
 }
 
+void ZenFS::GetSnapshot(std::vector<ZoneSnapshot>& zones,
+                        std::vector<ZoneFileSnapshot>& zone_files) {
+  {
+    files_mtx_.lock();
+    for (auto& file_it : files_) {
+      zone_files.emplace_back(*file_it.second);
+    }
+    files_mtx_.unlock();
+  }
+  zbd_->GetZonesSnapshot(zones);
+}
+
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;
 
 FactoryFunc<FileSystem> zenfs_filesystem_reg =
@@ -1216,9 +1224,6 @@ FactoryFunc<FileSystem> zenfs_filesystem_reg =
 namespace ROCKSDB_NAMESPACE {
 Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/,
                 ZenFSMetrics* /*metrics*/) {
-  return Status::NotSupported("Not built with ZenFS support\n");
-}
-Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/) {
   return Status::NotSupported("Not built with ZenFS support\n");
 }
 std::map<std::string, std::string> ListZenFileSystems() {
