@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "metrics.h"
+#include "zbd_stat.h"
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
 
@@ -145,6 +146,7 @@ class ZonedBlockDevice {
   std::mutex zone_resources_mtx_; /* Protects active/open io zones */
 
   std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
+  std::vector<ZoneStat> GetStat();
 
  private:
   std::string ErrorToString(int err);

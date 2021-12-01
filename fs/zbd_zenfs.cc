@@ -24,6 +24,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 #include "rocksdb/env.h"
 
@@ -686,6 +687,18 @@ void ZonedBlockDevice::EncodeJson(std::ostream &json_stream) {
   json_stream << ",\"io\":";
   EncodeJsonZone(json_stream, io_zones);
   json_stream << "}";
+}
+
+std::vector<ZoneStat> ZonedBlockDevice::GetStat() {
+  std::vector<ZoneStat> stat;
+  for (const auto z : io_zones) {
+    ZoneStat zone_stat;
+    zone_stat.total_capacity = z->max_capacity_;
+    zone_stat.write_position = z->wp_;
+    zone_stat.start_position = z->start_;
+    stat.emplace_back(std::move(zone_stat));
+  }
+  return stat;
 }
 
 }  // namespace ROCKSDB_NAMESPACE
