@@ -25,15 +25,18 @@ namespace ROCKSDB_NAMESPACE {
 class ZoneSnapshot {
  private:
   uint64_t start_;
+  uint64_t capacity_;
   uint64_t max_capacity_;
   uint64_t wp_;
 
  public:
   ZoneSnapshot(const Zone& zone)
-      : start_(zone.start_), max_capacity_(zone.max_capacity_), wp_(zone.wp_) {}
+      : start_(zone.start_), capacity_(zone.capacity_),
+      max_capacity_(zone.max_capacity_), wp_(zone.wp_) {}
 
  public:
   uint64_t ID() const { return start_; }
+  uint64_t RemainingCapacity() const { return capacity_; }
   uint64_t TotalCapacity() const { return max_capacity_; }
   uint64_t StartPosition() const { return start_; }
   uint64_t WritePosition() const { return wp_; }
