@@ -1117,11 +1117,6 @@ Status NewZenFS(FileSystem** fs, const std::string& bdevname,
   return Status::OK();
 }
 
-Status NewZenFS(FileSystem** fs, const std::string& bdevname) {
-  auto metrics = std::make_shared<NoZenFSMetrics>();
-  return NewZenFS(fs, bdevname, metrics);
-}
-
 std::map<std::string, std::string> ListZenFileSystems() {
   std::map<std::string, std::string> zenFileSystems;
   auto closedirDeleter = [](DIR* d) {
@@ -1229,9 +1224,6 @@ FactoryFunc<FileSystem> zenfs_filesystem_reg =
 namespace ROCKSDB_NAMESPACE {
 Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/,
                 ZenFSMetrics* /*metrics*/) {
-  return Status::NotSupported("Not built with ZenFS support\n");
-}
-Status NewZenFS(FileSystem** /*fs*/, const std::string& /*bdevname*/) {
   return Status::NotSupported("Not built with ZenFS support\n");
 }
 std::map<std::string, std::string> ListZenFileSystems() {
