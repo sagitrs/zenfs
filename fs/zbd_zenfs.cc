@@ -7,6 +7,7 @@
 #if !defined(ROCKSDB_LITE) && !defined(OS_WIN)
 
 #include "zbd_zenfs.h"
+#include "snapshot.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -18,13 +19,13 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
-#include <algorithm>
 
 #include "rocksdb/env.h"
 
@@ -689,16 +690,8 @@ void ZonedBlockDevice::EncodeJson(std::ostream &json_stream) {
   json_stream << "}";
 }
 
-std::vector<ZoneStat> ZonedBlockDevice::GetStat() {
-  std::vector<ZoneStat> stat;
-  for (const auto z : io_zones) {
-    ZoneStat zone_stat;
-    zone_stat.total_capacity = z->max_capacity_;
-    zone_stat.write_position = z->wp_;
-    zone_stat.start_position = z->start_;
-    stat.emplace_back(std::move(zone_stat));
-  }
-  return stat;
+void ZonedBlockDevice::GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot) {
+  for (auto &zone : io_zones) snapshot.emplace_back(*zone);
 }
 
 }  // namespace ROCKSDB_NAMESPACE

@@ -24,13 +24,13 @@
 #include <vector>
 
 #include "metrics.h"
-#include "zbd_stat.h"
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
 
 namespace ROCKSDB_NAMESPACE {
 
 class ZonedBlockDevice;
+class ZoneSnapshot;
 
 class Zone {
   ZonedBlockDevice *zbd_;
@@ -146,7 +146,7 @@ class ZonedBlockDevice {
   std::mutex zone_resources_mtx_; /* Protects active/open io zones */
 
   std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
-  std::vector<ZoneStat> GetStat();
+  void GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot);
 
  private:
   std::string ErrorToString(int err);

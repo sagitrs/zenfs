@@ -20,6 +20,7 @@
 
 #include "metrics_sample.h"
 #include "rocksdb/utilities/object_registry.h"
+#include "snapshot.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
 
@@ -1171,43 +1172,16 @@ std::map<std::string, std::string> ListZenFileSystems() {
   return zenFileSystems;
 }
 
-std::vector<ZoneStat> ZenFS::GetStat() {
-  // Store size of each file_id in each zone
-  std::map<uint64_t, std::map<uint64_t, uint64_t>> sizes;
-  // Store file_id to filename map
-  std::map<uint64_t, std::string> filenames;
-
-  files_mtx_.lock();
-
-  for (auto& file_it : files_) {
-    std::shared_ptr<ZoneFile> file = file_it.second;
-    uint64_t file_id = file->GetID();
-    filenames[file_id] = file->GetFilename();
-    for (ZoneExtent* extent : file->GetExtents()) {
-      uint64_t zone_fake_id = extent->zone_->start_;
-      sizes[zone_fake_id][file_id] += extent->length_;
+void ZenFS::GetSnapshot(std::vector<ZoneSnapshot>& zones,
+                        std::vector<ZoneFileSnapshot>& zone_files) {
+  {
+    files_mtx_.lock();
+    for (auto& file_it : files_) {
+      zone_files.emplace_back(*file_it.second);
     }
+    files_mtx_.unlock();
   }
-
-  files_mtx_.unlock();
-
-  // Final result vector
-  std::vector<ZoneStat> stat = zbd_->GetStat();
-
-  for (auto& zone : stat) {
-    std::map<uint64_t, uint64_t>& zone_files = sizes[zone.start_position];
-    for (auto& file : zone_files) {
-      uint64_t file_id = file.first;
-      uint64_t file_length = file.second;
-      ZoneFileStat file_stat;
-      file_stat.file_id = file_id;
-      file_stat.size_in_zone = file_length;
-      file_stat.filename = filenames[file_id];
-      zone.files.emplace_back(std::move(file_stat));
-    }
-  }
-
-  return stat;
+  zbd_->GetZonesSnapshot(zones);
 }
 
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;

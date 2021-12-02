@@ -10,15 +10,18 @@
 
 #include "io_zenfs.h"
 #include "metrics.h"
-#include "zbd_stat.h"
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
 #include "rocksdb/status.h"
+#include "snapshot.h"
 #include "zbd_zenfs.h"
 
 namespace ROCKSDB_NAMESPACE {
 
 #if !defined(ROCKSDB_LITE) && defined(OS_LINUX)
+
+class ZoneSnapshot;
+class ZoneFileSnapshot;
 
 class Superblock {
   uint32_t magic_ = 0;
@@ -353,7 +356,8 @@ class ZenFS : public FileSystemWrapper {
                                 IODebugContext* /*dbg*/) override {
     return IOStatus::NotSupported("AreFilesSame is not supported in ZenFS");
   }
-  std::vector<ZoneStat> GetStat();
+  void GetSnapshot(std::vector<ZoneSnapshot>& zones,
+                   std::vector<ZoneFileSnapshot>& zone_files);
 };
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 
