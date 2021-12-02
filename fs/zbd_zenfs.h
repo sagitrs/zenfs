@@ -29,6 +29,7 @@
 namespace ROCKSDB_NAMESPACE {
 
 class ZonedBlockDevice;
+class ZoneSnapshot;
 
 class Zone {
   ZonedBlockDevice *zbd_;
@@ -137,6 +138,8 @@ class ZonedBlockDevice {
   void EncodeJson(std::ostream &json_stream);
 
   std::mutex zone_resources_mtx_; /* Protects active/open io zones */
+
+  void GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot);
 
  private:
   std::string ErrorToString(int err);
