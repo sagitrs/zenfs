@@ -6,8 +6,6 @@
 
 #pragma once
 
-#if !defined(ROCKSDB_LITE) && defined(OS_LINUX)
-
 #include <string>
 #include <vector>
 #include "io_zenfs.h"
@@ -31,8 +29,10 @@ class ZoneSnapshot {
 
  public:
   ZoneSnapshot(const Zone& zone)
-      : start_(zone.start_), capacity_(zone.capacity_),
-      max_capacity_(zone.max_capacity_), wp_(zone.wp_) {}
+      : start_(zone.start_),
+        capacity_(zone.capacity_),
+        max_capacity_(zone.max_capacity_),
+        wp_(zone.wp_) {}
 
  public:
   uint64_t ID() const { return start_; }
@@ -79,5 +79,3 @@ struct ZoneFileSnapshot {
 };
 
 }  // namespace ROCKSDB_NAMESPACE
-
-#endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)

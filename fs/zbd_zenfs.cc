@@ -713,8 +713,7 @@ void ZonedBlockDevice::EncodeJson(std::ostream &json_stream) {
 }
 
 void ZonedBlockDevice::GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot) {
-  for (auto &zone : io_zones) 
-    snapshot.emplace_back(*zone);
+  for (auto &zone : io_zones) snapshot.emplace_back(*zone);
 }
 IOStatus ZonedBlockDevice::GetZoneDeferredStatus() {
   std::lock_guard<std::mutex> lock(zone_deferred_status_mutex_);
