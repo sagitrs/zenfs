@@ -528,10 +528,6 @@ IOStatus ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime,
     return s;
   }
 
-  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_IO_ALLOC_NON_WAL_LATENCY,
-                                 Env::Default());
-  metrics_->ReportQPS(ZENFS_IO_ALLOC_QPS, 1);
-
   io_zones_mtx.lock();
 
   /* Make sure we are below the zone open limit */
