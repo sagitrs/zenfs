@@ -51,9 +51,9 @@ struct NoZenFSMetrics : public ZenFSMetrics {
   virtual ~NoZenFSMetrics() {}
 
  public:
-  virtual void AddReporter(uint32_t label, uint32_t type = 0) override {}
-  virtual void Report(uint32_t label, size_t value,
-                      uint32_t type_check = 0) override {}
+  virtual void AddReporter(uint32_t /*label*/, uint32_t /*type*/) override {}
+  virtual void Report(uint32_t /*label*/, size_t /*value*/,
+                      uint32_t /*type_check*/) override {}
 };
 
 // The implementation of this class will start timing when initialized,
