@@ -357,8 +357,8 @@ class ZenFS : public FileSystemWrapper {
                                 IODebugContext* /*dbg*/) override {
     return IOStatus::NotSupported("AreFilesSame is not supported in ZenFS");
   }
-  void GetSnapshot(std::vector<ZoneSnapshot>& zones,
-                   std::vector<ZoneFileSnapshot>& zone_files);
+  void GetZoneSnapshot(std::vector<ZoneSnapshot>& zones);
+  void GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files);
 };
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 

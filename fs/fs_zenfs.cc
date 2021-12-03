@@ -1172,16 +1172,16 @@ std::map<std::string, std::string> ListZenFileSystems() {
   return zenFileSystems;
 }
 
-void ZenFS::GetSnapshot(std::vector<ZoneSnapshot>& zones,
-                        std::vector<ZoneFileSnapshot>& zone_files) {
-  {
-    files_mtx_.lock();
-    for (auto& file_it : files_) {
-      zone_files.emplace_back(*file_it.second);
-    }
-    files_mtx_.unlock();
-  }
+void ZenFS::GetZoneSnapshot(std::vector<ZoneSnapshot>& zones) {
   zbd_->GetZonesSnapshot(zones);
+}
+
+void ZenFS::GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files) {
+  files_mtx_.lock();
+  for (auto& file_it : files_) {
+    zone_files.emplace_back(*file_it.second);
+  }
+  files_mtx_.unlock();
 }
 
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;
