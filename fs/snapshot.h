@@ -34,10 +34,9 @@ class ZoneSnapshot {
         max_capacity_(zone.max_capacity_),
         wp_(zone.wp_) {}
 
- public:
   uint64_t ID() const { return start_; }
   uint64_t RemainingCapacity() const { return capacity_; }
-  uint64_t TotalCapacity() const { return max_capacity_; }
+  uint64_t MaxCapacity() const { return max_capacity_; }
   uint64_t StartPosition() const { return start_; }
   uint64_t WritePosition() const { return wp_; }
 };
@@ -54,7 +53,6 @@ struct ZoneExtentSnapshot {
         length_(extent.length_),
         zone_start_(extent.zone_->start_) {}
 
- public:
   uint64_t Start() const { return start_; }
   uint64_t Length() const { return length_; }
   uint64_t ZoneID() const { return zone_start_; }
@@ -72,7 +70,6 @@ struct ZoneFileSnapshot {
     for (ZoneExtent*& extent : file.GetExtents()) extent_.emplace_back(*extent);
   }
 
- public:
   uint64_t FileID() const { return file_id_; }
   const std::string& Filename() const { return filename_; }
   const std::vector<ZoneExtentSnapshot>& Extent() const { return extent_; }
