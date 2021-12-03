@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "rocksdb/file_system.h"
+#include "rocksdb/io_status.h"
 #include "zbd_zenfs.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -62,7 +63,7 @@ class ZoneFile {
   virtual ~ZoneFile();
 
   void OpenWR();
-  void CloseWR();
+  IOStatus CloseWR();
   bool IsOpenForWR();
 
   IOStatus Append(void* data, int data_size, int valid_size);
@@ -75,6 +76,7 @@ class ZoneFile {
   void SetFileSize(uint64_t sz);
 
   uint32_t GetBlockSize() { return zbd_->GetBlockSize(); }
+  ZonedBlockDevice* GetZbd() { return zbd_; }
   std::vector<ZoneExtent*> GetExtents() { return extents_; }
   Env::WriteLifeTimeHint GetWriteLifeTimeHint() { return lifetime_; }
 
@@ -100,6 +102,7 @@ class ZoneFile {
  private:
   void ReleaseActiveZone();
   void SetActiveZone(Zone* zone);
+  IOStatus CloseActiveZone();
   std::shared_ptr<ZenFSMetrics> GetZBDMetrics() { return zbd_->GetMetrics(); }
 };
 

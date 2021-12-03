@@ -1,7 +1,4 @@
 //  SPDX-License-Identifier: Apache License 2.0 OR GPL-2.0
-//  Written by Liu Ruicheng <sagitrs67@gmail.com>
-
-#pragma once
 #include <iostream>
 #include <unordered_map>
 
@@ -124,13 +121,13 @@ struct ZenFSMetricsSample : public ZenFSMetrics {
   virtual void AddReporter(uint32_t label_uint,
                            uint32_t type_uint = 0) override {
     auto label = static_cast<ZenFSMetricsHistograms>(label_uint);
-    assert(ZenFSHistogramsNameMap.find(label) !=
-           BDZenFSHistogramsNameMap.end());
+    assert(ZenFSHistogramsNameMap.find(label) != ZenFSHistogramsNameMap.end());
     auto type = ZenFSHistogramsTypeMap.find(label)->second;
 
     if (type_uint != 0) {
       auto type_check = static_cast<ZenFSMetricsReporterType>(type_uint);
       assert(type_check == type);
+      (void)type_check;
     }
 
     switch (type) {
@@ -146,8 +143,7 @@ struct ZenFSMetricsSample : public ZenFSMetrics {
   virtual void Report(uint32_t label_uint, size_t value,
                       uint32_t type_uint = 0) override {
     auto label = static_cast<ZenFSMetricsHistograms>(label_uint);
-    assert(ZenFSHistogramsNameMap.find(label) !=
-           BDZenFSHistogramsNameMap.end());
+    assert(ZenFSHistogramsNameMap.find(label) != ZenFSHistogramsNameMap.end());
     auto p = reporter_map_.find(static_cast<ZenFSMetricsHistograms>(label));
     assert(p != reporter_map_.end());
     TypeReporter& reporter = p->second;
@@ -156,6 +152,7 @@ struct ZenFSMetricsSample : public ZenFSMetrics {
     if (type_uint != 0) {
       auto type_check = static_cast<ZenFSMetricsReporterType>(type_uint);
       assert(type_check == type);
+      (void)type_check;
     }
 
     switch (type) {

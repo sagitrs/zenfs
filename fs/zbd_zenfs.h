@@ -71,6 +71,8 @@ class Zone {
   void EncodeJson(std::ostream &json_stream);
 
   IOStatus CloseWR(); /* Done writing */
+
+  inline IOStatus CheckRelease();
 };
 
 class ZonedBlockDevice {
@@ -91,7 +93,12 @@ class ZonedBlockDevice {
 
   std::atomic<long> active_io_zones_;
   std::atomic<long> open_io_zones_;
+  /* Protects zone_resuorces_  condition variable, used
+     for notifying changes in open_io_zones_ */
+  std::mutex zone_resources_mtx_;
   std::condition_variable zone_resources_;
+  std::mutex zone_deferred_status_mutex_;
+  IOStatus zone_deferred_status_;
 
   unsigned int max_nr_active_io_zones_;
   unsigned int max_nr_open_io_zones_;
@@ -103,10 +110,9 @@ class ZonedBlockDevice {
 
  public:
   explicit ZonedBlockDevice(std::string bdevname,
-                            std::shared_ptr<Logger> logger);
-  explicit ZonedBlockDevice(std::string bdevname,
                             std::shared_ptr<Logger> logger,
-                            std::shared_ptr<ZenFSMetrics> metrics);
+                            std::shared_ptr<ZenFSMetrics> metrics =
+                                std::make_shared<NoZenFSMetrics>());
   virtual ~ZonedBlockDevice();
 
   IOStatus Open(bool readonly, bool exclusive);
@@ -114,8 +120,8 @@ class ZonedBlockDevice {
 
   Zone *GetIOZone(uint64_t offset);
 
-  Zone *AllocateZone(Env::WriteLifeTimeHint lifetime);
-  Zone *AllocateMetaZone();
+  IOStatus AllocateZone(Env::WriteLifeTimeHint file_lifetime, Zone **out_zone);
+  IOStatus AllocateMetaZone(Zone **out_meta_zone);
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
@@ -124,7 +130,7 @@ class ZonedBlockDevice {
   std::string GetFilename();
   uint32_t GetBlockSize();
 
-  void ResetUnusedIOZones();
+  Status ResetUnusedIOZones();
   void LogZoneStats();
   void LogZoneUsage();
 
@@ -143,13 +149,16 @@ class ZonedBlockDevice {
 
   void EncodeJson(std::ostream &json_stream);
 
-  std::mutex zone_resources_mtx_; /* Protects active/open io zones */
+  void SetZoneDeferredStatus(IOStatus status);
+
+  std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
 
   std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
   void GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot);
 
  private:
   std::string ErrorToString(int err);
+  IOStatus GetZoneDeferredStatus();
 };
 
 }  // namespace ROCKSDB_NAMESPACE
