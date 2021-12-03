@@ -724,7 +724,7 @@ void ZonedBlockDevice::SetZoneDeferredStatus(IOStatus status) {
   }
 }
 
-void ZonedBlockDevice::GetZonesSnapshot(std::vector<ZoneSnapshot> &snapshot,
+void ZonedBlockDevice::GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot,
                                         const ZenFSSnapshotOptions &options) {
   for (auto &zone : io_zones) snapshot.emplace_back(*zone, options);
 }

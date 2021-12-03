@@ -1178,15 +1178,14 @@ void ZenFS::GetZBDSnapshot(ZBDSnapshot& zones,
 }
 void ZenFS::GetZoneSnapshot(std::vector<ZoneSnapshot>& zones,
                             const ZenFSSnapshotOptions& options) {
-  zbd_->GetZonesSnapshot(zones, options);
+  zbd_->GetZoneSnapshot(zones, options);
 }
 void ZenFS::GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files,
                                 const ZenFSSnapshotOptions& options) {
-  files_mtx_.lock();
+  std::lock_guard<std::mutex> file_lock(files_mtx_);
   for (auto& file_it : files_) {
     zone_files.emplace_back(*file_it.second, options);
   }
-  files_mtx_.unlock();
 }
 void ZenFS::GetSnapshot(ZenFSSnapshot& snapshot,
                         const ZenFSSnapshotOptions& options) {

@@ -70,8 +70,6 @@ class ZBDSnapshot {
         reclaimable_space_ = zbd.GetReclaimableSpace();
     }
   }
-
- public:
   uint64_t GetFreeSpace() const { return free_space_; }
   uint64_t GetUsedSpace() const { return used_space_; }
   uint64_t GetReclaimableSpace() const { return reclaimable_space_; }
@@ -94,7 +92,6 @@ class ZoneSnapshot {
     }
   }
 
- public:
   uint64_t ID() const { return start_; }
   uint64_t RemainingCapacity() const { return capacity_; }
   uint64_t MaxCapacity() const { return max_capacity_; }
@@ -119,7 +116,6 @@ struct ZoneExtentSnapshot {
     }
   }
 
- public:
   uint64_t Start() const { return start_; }
   uint64_t Length() const { return length_; }
   uint64_t ZoneID() const { return zone_start_; }
@@ -139,11 +135,10 @@ struct ZoneFileSnapshot {
       if (options.zone_file_.filename_) filename_ = file.GetFilename();
     }
     if (options.zone_extent_.enabled_)
-      for (ZoneExtent*& extent : file.GetExtents())
+      for (ZoneExtent* const& extent : file.GetExtents())
         extent_.emplace_back(*extent, options);
   }
 
- public:
   uint64_t FileID() const { return file_id_; }
   const std::string& Filename() const { return filename_; }
   const std::vector<ZoneExtentSnapshot>& Extent() const { return extent_; }
