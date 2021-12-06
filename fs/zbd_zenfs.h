@@ -118,7 +118,7 @@ class ZonedBlockDevice {
   Zone *GetIOZone(uint64_t offset);
 
   Zone *AllocateIOZone(Env::WriteLifeTimeHint lifetime, IOType io_type);
-  Zone *AllocateMetaZone();
+  IOStatus AllocateMetaZone(Zone **out_meta_zone);
 
   uint64_t GetFreeSpace();
   uint64_t GetUsedSpace();
@@ -145,7 +145,6 @@ class ZonedBlockDevice {
 
   void EncodeJson(std::ostream &json_stream);
 
-  std::mutex zone_resources_mtx_; /* Protects active/open io zones */
   IOStatus ResetUnusedIOZones();
 
  private:
@@ -157,7 +156,7 @@ class ZonedBlockDevice {
   IOStatus FinishCheapestIOZone();
   Zone *GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetime, unsigned int *best_diff_out);
   Zone *AllocateEmptyZone();
-
+ public:
   std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
   void GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot);
 };
