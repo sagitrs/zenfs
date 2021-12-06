@@ -509,6 +509,47 @@ void ZonedBlockDevice::PutActiveIOZoneToken() {
   zone_resources_.notify_one();
 }
 
+void ZonedBlockDevice::WaitForOpenIOZoneToken() {
+  /* Wait for an open IO Zone token - after this function returns
+   * the caller is allowed to write to a closed zone. The callee
+   * is responsible for calling a PutOpenIOZoneToken to return the resource
+   */
+  std::unique_lock<std::mutex> lk(zone_resources_mtx_);
+  zone_resources_.wait(lk, [this] {
+    if (open_io_zones_.load() < max_nr_open_io_zones_) {
+      open_io_zones_++;
+      return true;
+    } else {
+      return false;
+    }
+  });
+}
+
+bool ZonedBlockDevice::GetActiveIOZoneTokenIfAvailable() {
+  /* Grap an active IO Zone token if available - after this function returns
+   * the caller is allowed to write to a closed zone. The callee
+   * is responsible for calling a PutActiveIOZoneToken to return the resource
+   */
+  std::unique_lock<std::mutex> lk(zone_resources_mtx_);
+  if (active_io_zones_.load() < max_nr_active_io_zones_) {
+    active_io_zones_++;
+    return true;
+  }
+  return false;
+}
+
+void ZonedBlockDevice::PutOpenIOZoneToken() {
+  std::unique_lock<std::mutex> lk(zone_resources_mtx_);
+  open_io_zones_--;
+  zone_resources_.notify_one();
+}
+
+void ZonedBlockDevice::PutActiveIOZoneToken() {
+  std::unique_lock<std::mutex> lk(zone_resources_mtx_);
+  active_io_zones_--;
+  zone_resources_.notify_one();
+}
+
 IOStatus ZonedBlockDevice::ResetUnusedIOZones() {
   for (const auto z : io_zones) {
     if (z->Acquire()) {
@@ -633,6 +674,48 @@ Zone *ZonedBlockDevice::GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetim
       }
     }
   }
+
+  *best_diff_out = best_diff;
+  return allocated_zone;
+}
+
+Zone *ZonedBlockDevice::AllocateEmptyZone() {
+  Zone *allocated_zone = nullptr;
+  for (const auto z : io_zones) {
+    if (z->Acquire()) {
+      if (z->IsEmpty()) {
+        allocated_zone = z;
+        break;
+      } else {
+        z->Release();
+      }
+    }
+  }
+  return allocated_zone;
+}
+
+Zone *ZonedBlockDevice::AllocateIOZone(Env::WriteLifeTimeHint file_lifetime,
+                                       IOType io_type) {
+  Zone *allocated_zone = nullptr;
+  unsigned int best_diff = LIFETIME_DIFF_NOT_GOOD;
+  int new_zone = 0;
+  IOStatus s;
+  bool ok;
+  /* ok is unused in non-debug-builds, due to assertions being disabled */
+  (void)ok;
+
+  WaitForOpenIOZoneToken();
+
+  /* Only do zone maintenence for non-wal allocations */
+  if (io_type != IOType::kWAL) {
+    s = ApplyFinishThreshold();
+    if (!s.ok()) {
+      return nullptr;
+    }
+  }
+
+  /* Try to fill an already open zone(with the best life time diff) */
+  allocated_zone = GetBestOpenZoneMatch(file_lifetime, &best_diff);
 
   *best_diff_out = best_diff;
   return allocated_zone;

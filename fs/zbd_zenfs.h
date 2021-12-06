@@ -145,6 +145,7 @@ class ZonedBlockDevice {
 
   void EncodeJson(std::ostream &json_stream);
 
+  std::mutex zone_resources_mtx_; /* Protects active/open io zones */
   IOStatus ResetUnusedIOZones();
 
  private:

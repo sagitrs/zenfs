@@ -488,7 +488,7 @@ IOStatus ZoneFile::SparseAppend(char* sparse_buffer, uint32_t data_size) {
 IOStatus ZoneFile::Append(void* data, int data_size) {
   uint32_t left = data_size;
   uint32_t wr_size, offset = 0;
-  IOStatus s = IOStatus::OK();
+  IOStatus s;
 
   if (active_zone_ == NULL) {
     s = AllocateNewZone();
