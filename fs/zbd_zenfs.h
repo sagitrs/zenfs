@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "metrics.h"
 #include "rocksdb/env.h"
 #include "rocksdb/io_status.h"
 #include "rocksdb/file_system.h"
@@ -30,6 +31,7 @@
 namespace ROCKSDB_NAMESPACE {
 
 class ZonedBlockDevice;
+class ZoneSnapshot;
 
 class Zone {
   ZonedBlockDevice *zbd_;
@@ -88,17 +90,26 @@ class ZonedBlockDevice {
 
   std::atomic<long> active_io_zones_;
   std::atomic<long> open_io_zones_;
+  /* Protects zone_resuorces_  condition variable, used
+     for notifying changes in open_io_zones_ */
+  std::mutex zone_resources_mtx_;
   std::condition_variable zone_resources_;
+  std::mutex zone_deferred_status_mutex_;
+  IOStatus zone_deferred_status_;
 
   unsigned int max_nr_active_io_zones_;
   unsigned int max_nr_open_io_zones_;
+
+  std::shared_ptr<ZenFSMetrics> metrics_;
 
   void EncodeJsonZone(std::ostream &json_stream,
                       const std::vector<Zone *> zones);
 
  public:
   explicit ZonedBlockDevice(std::string bdevname,
-                            std::shared_ptr<Logger> logger);
+                            std::shared_ptr<Logger> logger,
+                            std::shared_ptr<ZenFSMetrics> metrics =
+                                std::make_shared<NoZenFSMetrics>());
   virtual ~ZonedBlockDevice();
 
   IOStatus Open(bool readonly, bool exclusive);
@@ -147,6 +158,8 @@ class ZonedBlockDevice {
   Zone *GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetime, unsigned int *best_diff_out);
   Zone *AllocateEmptyZone();
 
+  std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
+  void GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot);
 };
 
 }  // namespace ROCKSDB_NAMESPACE

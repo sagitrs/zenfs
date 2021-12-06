@@ -244,10 +244,23 @@ ZoneFile::~ZoneFile() {
     zone->used_capacity_ -= (*e)->length_;
     delete *e;
   }
-  CloseWR();
+  IOStatus s = CloseWR();
+  if (!s.ok()) {
+    zbd_->SetZoneDeferredStatus(s);
+  }
 }
 
-void ZoneFile::CloseWR() {
+IOStatus ZoneFile::CloseWR() {
+  IOStatus s = IOStatus::OK();
+
+  s = CloseActiveZone();
+  open_for_wr_ = false;
+
+  return s;
+}
+
+IOStatus ZoneFile::CloseActiveZone() {
+  IOStatus s = IOStatus::OK();
   if (active_zone_) {
     bool full = active_zone_->IsFull();
     IOStatus status = active_zone_->Close();
@@ -258,6 +271,8 @@ void ZoneFile::CloseWR() {
         zbd_->PutActiveIOZoneToken();
       }
     }
+    ReleaseActiveZone();
+    zbd_->NotifyIOZoneClosed();
   }
   extent_start_ = NO_EXTENT;
   open_for_wr_ = false;
@@ -290,6 +305,10 @@ ZoneExtent* ZoneFile::GetExtent(uint64_t file_offset, uint64_t* dev_offset) {
 
 IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
                                   char* scratch, bool direct) {
+  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(), ZENFS_READ_LATENCY,
+                                 Env::Default());
+  zbd_->GetMetrics()->ReportQPS(ZENFS_READ_QPS, 1);
+
   int f = zbd_->GetReadFD();
   int f_direct = zbd_->GetReadDirectFD();
   char* ptr;
@@ -394,6 +413,7 @@ IOStatus ZoneFile::AllocateNewZone() {
     if (!zone) {
       return IOStatus::NoSpace("Zone allocation failure\n");
     }
+
     SetActiveZone(zone);
     extent_start_ = active_zone_->wp_;
     extent_filepos_ = fileSize;

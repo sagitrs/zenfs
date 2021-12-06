@@ -18,13 +18,18 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "rocksdb/env.h"
+#include "rocksdb/io_status.h"
+#include "snapshot.h"
 
 #define KB (1024)
 #define MB (1024 * KB)
@@ -155,6 +160,16 @@ IOStatus Zone::Append(char *data, uint32_t size) {
   return IOStatus::OK();
 }
 
+inline IOStatus Zone::CheckRelease() {
+  if (!Release()) {
+    assert(false);
+    return IOStatus::Corruption("Failed to unset busy flag of zone " +
+                                std::to_string(GetZoneNr()));
+  }
+
+  return IOStatus::OK();
+}
+
 Zone *ZonedBlockDevice::GetIOZone(uint64_t offset) {
   for (const auto z : io_zones)
     if (z->start_ <= offset && offset < (z->start_ + zone_sz_)) return z;
@@ -162,10 +177,11 @@ Zone *ZonedBlockDevice::GetIOZone(uint64_t offset) {
 }
 
 ZonedBlockDevice::ZonedBlockDevice(std::string bdevname,
-                                   std::shared_ptr<Logger> logger)
-    : filename_("/dev/" + bdevname), logger_(logger) {
+                                   std::shared_ptr<Logger> logger,
+                                   std::shared_ptr<ZenFSMetrics> metrics)
+    : filename_("/dev/" + bdevname), logger_(logger), metrics_(metrics) {
   Info(logger_, "New Zoned Block Device: %s", filename_.c_str());
-};
+}
 
 std::string ZonedBlockDevice::ErrorToString(int err) {
   char *err_str = strerror(err);
@@ -218,14 +234,15 @@ IOStatus ZonedBlockDevice::Open(bool readonly, bool exclusive) {
   }
 
   if (read_f_ < 0) {
-    return IOStatus::InvalidArgument("Failed to open zoned block device: " +
-                                     ErrorToString(errno));
+    return IOStatus::InvalidArgument(
+        "Failed to open zoned block device for read: " + ErrorToString(errno));
   }
 
   read_direct_f_ = zbd_open(filename_.c_str(), O_RDONLY | O_DIRECT, &info);
   if (read_direct_f_ < 0) {
-    return IOStatus::InvalidArgument("Failed to open zoned block device: " +
-                                     ErrorToString(errno));
+    return IOStatus::InvalidArgument(
+        "Failed to open zoned block device for direct read: " +
+        ErrorToString(errno));
   }
 
   if (readonly) {
@@ -233,8 +250,9 @@ IOStatus ZonedBlockDevice::Open(bool readonly, bool exclusive) {
   } else {
     write_f_ = zbd_open(filename_.c_str(), O_WRONLY | O_DIRECT, &info);
     if (write_f_ < 0) {
-      return IOStatus::InvalidArgument("Failed to open zoned block device: " +
-                                       ErrorToString(errno));
+      return IOStatus::InvalidArgument(
+          "Failed to open zoned block device for write: " +
+          ErrorToString(errno));
     }
   }
 
@@ -294,15 +312,16 @@ IOStatus ZonedBlockDevice::Open(bool readonly, bool exclusive) {
   open_io_zones_ = 0;
 
   for (; i < reported_zones; i++) {
-    bool ok = false;
-
     struct zbd_zone *z = &zone_rep[i];
     /* Only use sequential write required zones */
     if (zbd_zone_type(z) == ZBD_ZONE_TYPE_SWR) {
       if (!zbd_zone_offline(z)) {
         Zone *newZone = new Zone(this, z);
-        ok = newZone->Acquire();
-        assert(ok);
+        if (!newZone->Acquire()) {
+          assert(false);
+          return IOStatus::Corruption("Failed to set busy flag of zone " +
+                                      std::to_string(newZone->GetZoneNr()));
+        }
         io_zones.push_back(newZone);
         if (zbd_zone_imp_open(z) || zbd_zone_exp_open(z) ||
             zbd_zone_closed(z)) {
@@ -313,9 +332,8 @@ IOStatus ZonedBlockDevice::Open(bool readonly, bool exclusive) {
             }
           }
         }
-        ok = newZone->Release();
-        assert(ok);
-        (void)(ok);
+        IOStatus status = newZone->CheckRelease();
+        if (!status.ok()) return status;
       }
     }
   }
@@ -426,23 +444,31 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime,
   return LIFETIME_DIFF_NOT_GOOD;
 }
 
-Zone *ZonedBlockDevice::AllocateMetaZone() {
+IOStatus ZonedBlockDevice::AllocateMetaZone(Zone **out_meta_zone) {
+  assert(out_meta_zone);
+  *out_meta_zone = nullptr;
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_META_ALLOC_LATENCY,
+                                 Env::Default());
+  metrics_->ReportQPS(ZENFS_META_ALLOC_QPS, 1);
+
   for (const auto z : meta_zones) {
     /* If the zone is not used, reset and use it */
     if (z->Acquire()) {
       if (!z->IsUsed()) {
         if (!z->IsEmpty() && !z->Reset().ok()) {
           Warn(logger_, "Failed resetting zone!");
-          bool ok = z->Release();
-          assert(ok);
-          (void)ok;
+          IOStatus status = z->CheckRelease();
+          if (!status.ok()) return status;
           continue;
         }
-        return z;
+        *out_meta_zone = z;
+        return IOStatus::OK();
       }
     }
   }
-  return nullptr;
+  assert(true);
+  Error(logger_, "Out of metadata zones, we should go to read only now.");
+  return IOStatus::NoSpace("Out of metadata zones");
 }
 
 void ZonedBlockDevice::WaitForOpenIOZoneToken() {
@@ -561,8 +587,8 @@ IOStatus ZonedBlockDevice::FinishCheapestIOZone() {
         assert(ok);
         finish_victim = z;
       } else {
-        ok = z->Release();
-        assert(ok);
+        IOStatus status = z->CheckRelease();
+        if (!status.ok()) return status;
       }
     }
   }
@@ -595,18 +621,18 @@ Zone *ZonedBlockDevice::GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetim
         unsigned int diff = GetLifeTimeDiff(z->lifetime_, file_lifetime);
         if (diff <= best_diff) {
           if (allocated_zone != nullptr) {
-            ok = allocated_zone->Release();
-            assert(ok);
+            IOStatus status = allocated_zone->CheckRelease();
+            if (!status.ok()) return status;
           }
           allocated_zone = z;
           best_diff = diff;
         } else {
-          ok = z->Release();
-          assert(ok);
+          IOStatus status = z->CheckRelease();
+          if (!status.ok()) return status;
         }
       } else {
-        ok = z->Release();
-        assert(ok);
+        IOStatus status = z->CheckRelease();
+        if (!status.ok()) return status;
       }
     }
   }
@@ -704,7 +730,12 @@ Zone *ZonedBlockDevice::AllocateIOZone(Env::WriteLifeTimeHint file_lifetime,
 
   LogZoneStats();
 
-  return allocated_zone;
+  *out_zone = allocated_zone;
+
+  metrics_->ReportGeneral(ZENFS_OPEN_ZONES, open_io_zones_);
+  metrics_->ReportGeneral(ZENFS_ACTIVE_ZONES, active_io_zones_);
+
+  return IOStatus::OK();
 }
 
 std::string ZonedBlockDevice::GetFilename() { return filename_; }
@@ -734,6 +765,22 @@ void ZonedBlockDevice::EncodeJson(std::ostream &json_stream) {
   json_stream << ",\"io\":";
   EncodeJsonZone(json_stream, io_zones);
   json_stream << "}";
+}
+
+IOStatus ZonedBlockDevice::GetZoneDeferredStatus() {
+  std::lock_guard<std::mutex> lock(zone_deferred_status_mutex_);
+  return zone_deferred_status_;
+}
+
+void ZonedBlockDevice::SetZoneDeferredStatus(IOStatus status) {
+  std::lock_guard<std::mutex> lk(zone_deferred_status_mutex_);
+  if (!zone_deferred_status_.ok()) {
+    zone_deferred_status_ = status;
+  }
+}
+
+void ZonedBlockDevice::GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot) {
+  for (auto &zone : io_zones) snapshot.emplace_back(*zone);
 }
 
 }  // namespace ROCKSDB_NAMESPACE
