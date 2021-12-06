@@ -296,16 +296,12 @@ IOStatus ZenFS::WriteEndRecord(ZenMetaLog* meta_log) {
 /* Assumes the files_mtx_ is held */
 IOStatus ZenFS::RollMetaZoneLocked() {
   std::unique_ptr<ZenMetaLog> new_meta_log, old_meta_log;
-  Zone* new_meta_zone = nullptr;
+  Zone* new_meta_zone;
   IOStatus s;
-
   ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(), ZENFS_ROLL_LATENCY,
                                  Env::Default());
   zbd_->GetMetrics()->ReportQPS(ZENFS_ROLL_QPS, 1);
-
-  IOStatus status = zbd_->AllocateMetaZone(&new_meta_zone);
-  if (!status.ok()) return status;
-
+  new_meta_zone = zbd_->AllocateMetaZone();
   if (!new_meta_zone) {
     assert(false);  // TMP
     Error(logger_, "Out of metadata zones, we should go to read only now.");
@@ -431,8 +427,6 @@ IOStatus ZenFS::DeleteFile(std::string fname) {
     } else {
       zoneFile.reset();
     }
-  } else {
-    s = IOStatus::NotFound("ZenFS::DeleteFile(): File not found");
   }
   files_mtx_.unlock();
 
@@ -651,43 +645,35 @@ IOStatus ZenFS::GetFileSize(const std::string& f, const IOOptions& options,
   return s;
 }
 
-IOStatus ZenFS::RenameFile(const std::string& source_path,
-                           const std::string& dest_path,
+IOStatus ZenFS::RenameFile(const std::string& f, const std::string& t,
                            const IOOptions& options, IODebugContext* dbg) {
-  std::shared_ptr<ZoneFile> source_file(nullptr);
-  std::shared_ptr<ZoneFile> existing_dest_file(nullptr);
+  std::shared_ptr<ZoneFile> zoneFile(nullptr);
   IOStatus s;
 
-  Debug(logger_, "Rename file: %s to : %s\n", source_path.c_str(),
-        dest_path.c_str());
+  Debug(logger_, "Rename file: %s to : %s\n", f.c_str(), t.c_str());
 
-  source_file = GetFile(source_path);
-  if (source_file != nullptr) {
-    existing_dest_file = GetFile(dest_path);
-    if (existing_dest_file != nullptr) {
-      s = DeleteFile(dest_path);
+  zoneFile = GetFile(f);
+  if (zoneFile != nullptr) {
+    s = DeleteFile(t);
+    if (s.ok()) {
+      files_mtx_.lock();
+      files_.erase(f);
+      zoneFile->Rename(t);
+      files_.insert(std::make_pair(t, zoneFile));
+      files_mtx_.unlock();
+
+      s = SyncFileMetadata(zoneFile);
       if (!s.ok()) {
-        return s;
+        /* Failed to persist the rename, roll back */
+        files_mtx_.lock();
+        files_.erase(t);
+        zoneFile->Rename(f);
+        files_.insert(std::make_pair(f, zoneFile));
+        files_mtx_.unlock();
       }
     }
-
-    files_mtx_.lock();
-    files_.erase(source_path);
-    source_file->Rename(dest_path);
-    files_.insert(std::make_pair(dest_path, source_file));
-    files_mtx_.unlock();
-
-    s = SyncFileMetadata(source_file);
-    if (!s.ok()) {
-      /* Failed to persist the rename, roll back */
-      std::lock_guard<std::mutex> lock(files_mtx_);
-      files_.erase(dest_path);
-      source_file->Rename(source_path);
-      files_.insert(std::make_pair(source_path, source_file));
-    }
   } else {
-    s = target()->RenameFile(ToAuxPath(source_path), ToAuxPath(dest_path),
-                             options, dbg);
+    s = target()->RenameFile(ToAuxPath(f), ToAuxPath(t), options, dbg);
   }
 
   return s;
@@ -905,11 +891,9 @@ Status ZenFS::Mount(bool readonly) {
     std::string scratch;
     Slice super_record;
 
-    if (!z->Acquire()) {
-      assert(false);
-      return Status::Aborted("Could not aquire busy flag of zone" +
-                             std::to_string(z->GetZoneNr()));
-    }
+    bool ok = z->Acquire();
+    assert(ok);
+    (void)ok;
 
     // log takes the ownership of z's busy flag.
     log.reset(new ZenMetaLog(zbd_, z));
@@ -1043,29 +1027,22 @@ Status ZenFS::MkFS(std::string aux_fs_path, uint32_t finish_threshold) {
   }
 
   ClearFiles();
-  Status status = zbd_->ResetUnusedIOZones();
-  if (!status.ok()) return status;
+  zbd_->ResetUnusedIOZones();
 
   for (const auto mz : metazones) {
-    if (!mz->Acquire()) {
-      assert(false);
-      return Status::Aborted("Could not aquire busy flag of zone " +
-                             std::to_string(mz->GetZoneNr()));
-    }
+    bool ok = mz->Acquire();
+    assert(ok);
+    (void)ok;
 
     if (mz->Reset().ok()) {
-      if (!meta_zone) meta_zone = mz;
+      if (!meta_zone) {
+        meta_zone = mz;
+      } else {
+        ok = mz->Release();
+        assert(ok);
+      }
     } else {
       Warn(logger_, "Failed to reset meta zone\n");
-    }
-
-    if (meta_zone != mz) {
-      // for meta_zone == mz the ownership of mz's busy flag is passed to log.
-      if (!mz->Release()) {
-        assert(false);
-        return Status::Aborted("Could not unset busy flag of zone " +
-                               std::to_string(mz->GetZoneNr()));
-      }
     }
   }
 
@@ -1136,7 +1113,7 @@ Status NewZenFS(FileSystem** fs, const std::string& bdevname,
   ZonedBlockDevice* zbd = new ZonedBlockDevice(bdevname, logger, metrics);
   IOStatus zbd_status = zbd->Open(false, true);
   if (!zbd_status.ok()) {
-    Error(logger, "mkfs: Failed to open zoned block device: %s",
+    Error(logger, "Failed to open zoned block device: %s",
           zbd_status.ToString().c_str());
     return Status::IOError(zbd_status.ToString());
   }

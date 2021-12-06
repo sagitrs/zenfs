@@ -244,23 +244,10 @@ ZoneFile::~ZoneFile() {
     zone->used_capacity_ -= (*e)->length_;
     delete *e;
   }
-  IOStatus s = CloseWR();
-  if (!s.ok()) {
-    zbd_->SetZoneDeferredStatus(s);
-  }
+  CloseWR();
 }
 
-IOStatus ZoneFile::CloseWR() {
-  IOStatus s = IOStatus::OK();
-
-  s = CloseActiveZone();
-  open_for_wr_ = false;
-
-  return s;
-}
-
-IOStatus ZoneFile::CloseActiveZone() {
-  IOStatus s = IOStatus::OK();
+void ZoneFile::CloseWR() {
   if (active_zone_) {
     bool full = active_zone_->IsFull();
     IOStatus status = active_zone_->Close();
@@ -271,8 +258,6 @@ IOStatus ZoneFile::CloseActiveZone() {
         zbd_->PutActiveIOZoneToken();
       }
     }
-    ReleaseActiveZone();
-    zbd_->NotifyIOZoneClosed();
   }
   extent_start_ = NO_EXTENT;
   open_for_wr_ = false;

@@ -83,7 +83,7 @@ class ZoneFile {
   virtual ~ZoneFile();
 
   void OpenWR(MetadataWriter* metadata_writer);
-  IOStatus CloseWR();
+  void CloseWR();
   bool IsOpenForWR();
   IOStatus PersistMetadata();
 
