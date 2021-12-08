@@ -45,11 +45,10 @@ class ZoneFile;
 class MetadataWriter {
  public:
   virtual ~MetadataWriter();
-  virtual IOStatus Persist(ZoneFile *zoneFile) = 0;
+  virtual IOStatus Persist(ZoneFile* zoneFile) = 0;
 };
 
 class ZoneFile {
-
  private:
   const uint64_t NO_EXTENT = 0xffffffffffffffff;
 
@@ -129,20 +128,18 @@ class ZoneFile {
   uint64_t HasActiveExtent() { return extent_start_ != NO_EXTENT; };
   uint64_t GetExtentStart() { return extent_start_; };
 
- IOStatus Recover();
+  IOStatus Recover();
 
  private:
   void ReleaseActiveZone();
   void SetActiveZone(Zone* zone);
   IOStatus CloseActiveZone();
   std::shared_ptr<ZenFSMetrics> GetZBDMetrics() { return zbd_->GetMetrics(); }
-  IOStatus RecoverSparseExtents(uint64_t start, uint64_t end, Zone *zone);
-
+  IOStatus RecoverSparseExtents(uint64_t start, uint64_t end, Zone* zone);
 };
 
 class ZonedWritableFile : public FSWritableFile {
  public:
-
   explicit ZonedWritableFile(ZonedBlockDevice* zbd, bool buffered,
                              std::shared_ptr<ZoneFile> zoneFile,
                              MetadataWriter* metadata_writer = nullptr);

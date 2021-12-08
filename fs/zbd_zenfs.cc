@@ -393,7 +393,6 @@ void ZonedBlockDevice::LogZoneStats() {
        time(NULL) - start_time_, used_capacity / MB, reclaimable_capacity / MB,
        100 * reclaimable_capacity / reclaimables_max_capacity, active,
        active_io_zones_.load(), open_io_zones_.load());
-
 }
 
 void ZonedBlockDevice::LogZoneUsage() {
@@ -477,16 +476,12 @@ IOStatus ZonedBlockDevice::ResetUnusedIOZones() {
         bool full = z->IsFull();
         IOStatus reset_status = z->Reset();
         IOStatus release_status = z->CheckRelease();
-        if (!reset_status.ok())
-          return reset_status;
-        if (!release_status.ok())
-          return release_status;
-        if (!full)
-          PutActiveIOZoneToken();
+        if (!reset_status.ok()) return reset_status;
+        if (!release_status.ok()) return release_status;
+        if (!full) PutActiveIOZoneToken();
       } else {
         IOStatus release_status = z->CheckRelease();
-        if (!release_status.ok())
-          return release_status;
+        if (!release_status.ok()) return release_status;
       }
     }
   }
@@ -537,12 +532,12 @@ void ZonedBlockDevice::PutActiveIOZoneToken() {
 IOStatus ZonedBlockDevice::ApplyFinishThreshold() {
   IOStatus s;
 
-   if (finish_threshold_ == 0)
-    return IOStatus::OK();
+  if (finish_threshold_ == 0) return IOStatus::OK();
 
   for (const auto z : io_zones) {
     if (z->Acquire()) {
-      bool within_finish_threshold = z->capacity_ < (z->max_capacity_ * finish_threshold_ / 100);
+      bool within_finish_threshold =
+          z->capacity_ < (z->max_capacity_ * finish_threshold_ / 100);
       if (!(z->IsEmpty() || z->IsFull()) && within_finish_threshold) {
         /* If there is less than finish_threshold_% remaining capacity in a
          * non-open-zone, finish the zone */
@@ -553,13 +548,11 @@ IOStatus ZonedBlockDevice::ApplyFinishThreshold() {
           return s;
         }
         s = z->CheckRelease();
-        if (!s.ok())
-          return s;
+        if (!s.ok()) return s;
         PutActiveIOZoneToken();
       } else {
         s = z->CheckRelease();
-        if (!s.ok())
-          return s;
+        if (!s.ok()) return s;
       }
     }
   }
@@ -575,8 +568,7 @@ IOStatus ZonedBlockDevice::FinishCheapestIOZone() {
     if (z->Acquire()) {
       if (z->IsEmpty() || z->IsFull()) {
         s = z->CheckRelease();
-        if (!s.ok())
-          return s;
+        if (!s.ok()) return s;
         continue;
       }
       if (finish_victim == nullptr) {
@@ -585,13 +577,11 @@ IOStatus ZonedBlockDevice::FinishCheapestIOZone() {
       }
       if (finish_victim->capacity_ > z->capacity_) {
         s = finish_victim->CheckRelease();
-        if (!s.ok())
-          return s;
+        if (!s.ok()) return s;
         finish_victim = z;
       } else {
         s = z->CheckRelease();
-        if (!s.ok())
-          return s;
+        if (!s.ok()) return s;
       }
     }
   }
@@ -614,8 +604,9 @@ IOStatus ZonedBlockDevice::FinishCheapestIOZone() {
   return s;
 }
 
-IOStatus ZonedBlockDevice::GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetime,
-                                             unsigned int *best_diff_out, Zone **zone_out) {
+IOStatus ZonedBlockDevice::GetBestOpenZoneMatch(
+    Env::WriteLifeTimeHint file_lifetime, unsigned int *best_diff_out,
+    Zone **zone_out) {
   unsigned int best_diff = LIFETIME_DIFF_NOT_GOOD;
   Zone *allocated_zone = nullptr;
   IOStatus s;
@@ -627,20 +618,17 @@ IOStatus ZonedBlockDevice::GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_life
         if (diff <= best_diff) {
           if (allocated_zone != nullptr) {
             s = allocated_zone->CheckRelease();
-            if (!s.ok())
-              return s;
+            if (!s.ok()) return s;
           }
           allocated_zone = z;
           best_diff = diff;
         } else {
           s = z->CheckRelease();
-          if (!s.ok())
-            return s;
+          if (!s.ok()) return s;
         }
       } else {
         s = z->CheckRelease();
-        if (!s.ok())
-           return s;
+        if (!s.ok()) return s;
       }
     }
   }
@@ -661,8 +649,7 @@ IOStatus ZonedBlockDevice::AllocateEmptyZone(Zone **zone_out) {
         break;
       } else {
         s = z->CheckRelease();
-        if (!s.ok())
-          return s;
+        if (!s.ok()) return s;
       }
     }
   }
@@ -689,7 +676,7 @@ IOStatus ZonedBlockDevice::AllocateIOZone(Env::WriteLifeTimeHint file_lifetime,
   if (io_type != IOType::kWAL) {
     s = ApplyFinishThreshold();
     if (!s.ok()) {
-        return s;
+      return s;
     }
   }
 
@@ -706,23 +693,27 @@ IOStatus ZonedBlockDevice::AllocateIOZone(Env::WriteLifeTimeHint file_lifetime,
 
   if (best_diff >= LIFETIME_DIFF_COULD_BE_WORSE) {
     if (io_type == IOType::kWAL && allocated_zone != nullptr) {
-        fprintf(stdout, "\n Did not find a good zone for WAL allocation. Best diff: %d\n",
-                (int)best_diff);
+      fprintf(stdout,
+              "\n Did not find a good zone for WAL allocation. Best diff: %d\n",
+              (int)best_diff);
     }
 
     bool got_token = GetActiveIOZoneTokenIfAvailable();
 
-    /* If we did not get a token, try to use the best match, even if the life time diff not good
-     * but a better choice than to finish an existing zone and open a new one
+    /* If we did not get a token, try to use the best match, even if the life
+     * time diff not good but a better choice than to finish an existing zone
+     * and open a new one
      */
     if (allocated_zone != nullptr) {
       if (!got_token && best_diff == LIFETIME_DIFF_COULD_BE_WORSE) {
-          Debug(logger_, "Allocator: avoided a finish by relaxing lifetime diff requirement\n");
+        Debug(logger_,
+              "Allocator: avoided a finish by relaxing lifetime diff "
+              "requirement\n");
       } else {
         s = allocated_zone->CheckRelease();
         if (!s.ok()) {
-           PutOpenIOZoneToken();
-           return s;
+          PutOpenIOZoneToken();
+          return s;
         }
         allocated_zone = nullptr;
       }
@@ -734,19 +725,19 @@ IOStatus ZonedBlockDevice::AllocateIOZone(Env::WriteLifeTimeHint file_lifetime,
       while (!got_token && !GetActiveIOZoneTokenIfAvailable()) {
         s = FinishCheapestIOZone();
         if (!s.ok()) {
-           PutOpenIOZoneToken();
-           return s;
+          PutOpenIOZoneToken();
+          return s;
         }
       }
 
       s = AllocateEmptyZone(&allocated_zone);
       if (!s.ok()) {
-         PutActiveIOZoneToken();
-         PutOpenIOZoneToken();
-         return s;
+        PutActiveIOZoneToken();
+        PutOpenIOZoneToken();
+        return s;
       }
 
-      if(allocated_zone != nullptr) {
+      if (allocated_zone != nullptr) {
         assert(allocated_zone->IsBusy());
         allocated_zone->lifetime_ = file_lifetime;
         new_zone = true;
@@ -814,8 +805,9 @@ void ZonedBlockDevice::SetZoneDeferredStatus(IOStatus status) {
   }
 }
 
-void ZonedBlockDevice::GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot) {
-  for (auto &zone : io_zones) snapshot.emplace_back(*zone);
+void ZonedBlockDevice::GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot,
+                                       const ZenFSSnapshotOptions &options) {
+  for (auto &zone : io_zones) snapshot.emplace_back(*zone, options);
 }
 
 }  // namespace ROCKSDB_NAMESPACE
