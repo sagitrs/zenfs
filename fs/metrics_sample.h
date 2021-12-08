@@ -6,6 +6,7 @@
 #include "metrics.h"
 #include "port/port.h"
 #include "util/mutexlock.h"
+#include "snapshot.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -166,7 +167,13 @@ struct ZenFSMetricsSample : public ZenFSMetrics {
       } break;
     }
   }
-
+  virtual void ReportSnapshot(const ZenFSSnapshot& snapshot, const ZenFSSnapshotOptions& options) {
+    if (options.zbd_.get_free_space_) {
+      uint64_t free_space_gb = snapshot.zbd_.GetFreeSpace() >> 30;
+      ReportGeneral(ZENFS_FREE_SPACE, free_space_gb);
+    }
+    // Report anything you care about.
+  }
  public:
   virtual void ReportQPS(uint32_t label, size_t qps) override {
     Report(label, qps, ZENFS_REPORTER_TYPE_QPS);
