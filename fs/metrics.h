@@ -6,10 +6,11 @@
 
 #pragma once
 #include "rocksdb/env.h"
-
 namespace ROCKSDB_NAMESPACE {
 
 class ZenFSMetricsGuard;
+class ZenFSSnapshot;
+class ZenFSSnapshotOptions;
 
 struct ZenFSMetrics {
  public:
@@ -30,6 +31,8 @@ struct ZenFSMetrics {
   // You can give a type for type-checking.
   virtual void Report(Label label, size_t value,
                       ReporterType type_check = 0) = 0;
+  virtual void ReportSnapshot(const ZenFSSnapshot& snapshot,
+                              const ZenFSSnapshotOptions& options) = 0;
 
  public:
   // Syntactic sugars for type-checking.
@@ -44,6 +47,7 @@ struct ZenFSMetrics {
   virtual void ReportGeneral(Label label, size_t data) {
     Report(label, data, 0);
   }
+
   // and more
 };
 
@@ -55,6 +59,9 @@ struct NoZenFSMetrics : public ZenFSMetrics {
   virtual void AddReporter(uint32_t /*label*/, uint32_t /*type*/) override {}
   virtual void Report(uint32_t /*label*/, size_t /*value*/,
                       uint32_t /*type_check*/) override {}
+  virtual void ReportSnapshot(
+      const ZenFSSnapshot& /*snapshot*/,
+      const ZenFSSnapshotOptions& /*options*/) override {}
 };
 
 // The implementation of this class will start timing when initialized,

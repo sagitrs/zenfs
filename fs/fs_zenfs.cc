@@ -1172,15 +1172,20 @@ std::map<std::string, std::string> ListZenFileSystems() {
   return zenFileSystems;
 }
 
-void ZenFS::GetZoneSnapshot(std::vector<ZoneSnapshot>& zones) {
-  zbd_->GetZoneSnapshot(zones);
-}
-
-void ZenFS::GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files) {
-  std::lock_guard<std::mutex> file_lock(files_mtx_);
-  for (auto& file_it : files_) {
-    zone_files.emplace_back(*file_it.second);
+void ZenFS::GetZenFSSnapshot(ZenFSSnapshot& snapshot,
+                             const ZenFSSnapshotOptions& options) {
+  if (options.zbd_.enabled_) {
+    snapshot.zbd_ = ZBDSnapshot(*zbd_, options);
   }
+  if (options.zone_.enabled_) zbd_->GetZoneSnapshot(snapshot.zones_, options);
+  if (options.zone_file_.enabled_) {
+    std::lock_guard<std::mutex> file_lock(files_mtx_);
+    for (auto& file_it : files_) {
+      snapshot.zone_files_.emplace_back(*file_it.second, options);
+    }
+  }
+  if (options.trigger_report_)
+    zbd_->GetMetrics()->ReportSnapshot(snapshot, options);
 }
 
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;
