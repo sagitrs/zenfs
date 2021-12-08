@@ -13,9 +13,11 @@ namespace ROCKSDB_NAMESPACE {
 
 const std::unordered_map<ZenFSMetricsHistograms, std::string>
     ZenFSHistogramsNameMap = {
+        {ZENFS_WRITE_LATENCY, "zenfs_write_latency"},
         {ZENFS_FG_WRITE_LATENCY, "zenfs_fg_write_latency"},
         {ZENFS_BG_WRITE_LATENCY, "zenfs_bg_write_latency"},
         {ZENFS_READ_LATENCY, "zenfs_read_latency"},
+        {ZENFS_SYNC_LATENCY, "zenfs_sync_latency"},
         {ZENFS_FG_SYNC_LATENCY, "fg_zenfs_sync_latency"},
         {ZENFS_BG_SYNC_LATENCY, "bg_zenfs_sync_latency"},
         {ZENFS_IO_ALLOC_WAL_LATENCY, "zenfs_io_alloc_wal_latency"},
@@ -44,9 +46,11 @@ const std::unordered_map<ZenFSMetricsHistograms, std::string>
 
 const std::unordered_map<ZenFSMetricsHistograms, ZenFSMetricsReporterType>
     ZenFSHistogramsTypeMap = {
+        {ZENFS_WRITE_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
         {ZENFS_FG_WRITE_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
         {ZENFS_BG_WRITE_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
         {ZENFS_READ_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
+        {ZENFS_SYNC_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
         {ZENFS_FG_SYNC_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
         {ZENFS_BG_SYNC_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
         {ZENFS_IO_ALLOC_WAL_LATENCY, ZENFS_REPORTER_TYPE_LATENCY},
@@ -70,7 +74,6 @@ const std::unordered_map<ZenFSMetricsHistograms, ZenFSMetricsReporterType>
         {ZENFS_USED_SPACE, ZENFS_REPORTER_TYPE_GENERAL},
         {ZENFS_RECLAIMABLE_SPACE, ZENFS_REPORTER_TYPE_GENERAL},
         {ZENFS_RESETABLE_ZONES, ZENFS_REPORTER_TYPE_GENERAL}};
-
 struct ReporterSample {
  public:
   typedef uint64_t TypeTime;

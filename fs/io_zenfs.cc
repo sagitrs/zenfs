@@ -720,9 +720,7 @@ IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
   ZenFSMetricsLatencyGuard guard(zoneFile_->GetZBDMetrics(), 
-                                 zoneFile_->GetIOType() == IOType::kWAL? 
-                                   ZENFS_FG_SYNC_LATENCY :
-                                   ZENFS_BG_SYNC_LATENCY,                         
+                                 ZENFS_SYNC_LATENCY,                         
                                  Env::Default());
   zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_SYNC_QPS, 1);
 
@@ -811,9 +809,7 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                    IODebugContext* /*dbg*/) {
   IOStatus s;
   ZenFSMetricsLatencyGuard guard(zoneFile_->GetZBDMetrics(), 
-                                 zoneFile_->GetIOType() == IOType::kWAL? 
-                                   ZENFS_FG_WRITE_LATENCY :
-                                   ZENFS_BG_WRITE_LATENCY,                         
+                                 ZENFS_WRITE_LATENCY,                         
                                  Env::Default());
   zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_WRITE_QPS, 1);
   zoneFile_->GetZBDMetrics()->ReportThroughput(ZENFS_WRITE_THROUGHPUT, 1);
