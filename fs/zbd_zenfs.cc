@@ -663,7 +663,10 @@ IOStatus ZonedBlockDevice::AllocateIOZone(Env::WriteLifeTimeHint file_lifetime,
   unsigned int best_diff = LIFETIME_DIFF_NOT_GOOD;
   int new_zone = 0;
   IOStatus s;
-  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_IO_ALLOC_NON_WAL_LATENCY,
+  ZenFSMetricsLatencyGuard guard(metrics_, 
+                                 io_type == IOType::kWAL ?
+                                  ZENFS_IO_ALLOC_WAL_LATENCY:
+                                  ZENFS_IO_ALLOC_NON_WAL_LATENCY,
                                  Env::Default());
   metrics_->ReportQPS(ZENFS_IO_ALLOC_QPS, 1);
 

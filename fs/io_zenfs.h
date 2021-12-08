@@ -90,6 +90,7 @@ class ZoneFile {
   IOStatus SparseAppend(char* data, uint32_t size);
   IOStatus SetWriteLifeTimeHint(Env::WriteLifeTimeHint lifetime);
   void SetIOType(IOType io_type);
+  IOType GetIOType();
   std::string GetFilename();
   void Rename(std::string name);
   time_t GetFileModificationTime();
@@ -130,11 +131,12 @@ class ZoneFile {
 
   IOStatus Recover();
 
+  std::shared_ptr<ZenFSMetrics> GetZBDMetrics() { return zbd_->GetMetrics(); }
+  
  private:
   void ReleaseActiveZone();
   void SetActiveZone(Zone* zone);
   IOStatus CloseActiveZone();
-  std::shared_ptr<ZenFSMetrics> GetZBDMetrics() { return zbd_->GetMetrics(); }
   IOStatus RecoverSparseExtents(uint64_t start, uint64_t end, Zone* zone);
 };
 

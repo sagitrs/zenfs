@@ -235,6 +235,7 @@ uint64_t ZoneFile::GetFileSize() { return fileSize; }
 void ZoneFile::SetFileSize(uint64_t sz) { fileSize = sz; }
 void ZoneFile::SetFileModificationTime(time_t mt) { m_time_ = mt; }
 void ZoneFile::SetIOType(IOType io_type) { io_type_ = io_type; }
+IOType ZoneFile::GetIOType() { return io_type_; }
 
 ZoneFile::~ZoneFile() {
   for (auto e = std::begin(extents_); e != std::end(extents_); ++e) {
@@ -718,6 +719,12 @@ IOStatus ZonedWritableFile::DataSync() {
 IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
+  ZenFSMetricsLatencyGuard guard(zoneFile_->GetZBDMetrics(), 
+                                 zoneFile_->GetIOType() == IOType::kWAL? 
+                                   ZENFS_FG_SYNC_LATENCY :
+                                   ZENFS_BG_SYNC_LATENCY,                         
+                                 Env::Default());
+  zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_SYNC_QPS, 1);
 
   s = DataSync();
   if (!s.ok()) return s;
@@ -803,6 +810,13 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                    const IOOptions& /*options*/,
                                    IODebugContext* /*dbg*/) {
   IOStatus s;
+  ZenFSMetricsLatencyGuard guard(zoneFile_->GetZBDMetrics(), 
+                                 zoneFile_->GetIOType() == IOType::kWAL? 
+                                   ZENFS_FG_WRITE_LATENCY :
+                                   ZENFS_BG_WRITE_LATENCY,                         
+                                 Env::Default());
+  zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_WRITE_QPS, 1);
+  zoneFile_->GetZBDMetrics()->ReportThroughput(ZENFS_WRITE_THROUGHPUT, 1);
 
   if (buffered) {
     buffer_mtx_.lock();
