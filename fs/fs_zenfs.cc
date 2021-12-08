@@ -224,7 +224,7 @@ ZenFS::~ZenFS() {
 void ZenFS::Repair() {
   std::map<std::string, std::shared_ptr<ZoneFile>>::iterator it;
   for (it = files_.begin(); it != files_.end(); it++) {
-    const char *filename = it->first.c_str();
+    const char* filename = it->first.c_str();
     std::shared_ptr<ZoneFile> zFile = it->second;
     if (zFile->HasActiveExtent()) {
       fprintf(stderr, "Recovering data for: %s \n", filename);
@@ -248,7 +248,8 @@ void ZenFS::LogFiles() {
     std::vector<ZoneExtent*> extents = zFile->GetExtents();
 
     Info(logger_, "    %-45s sz: %lu lh: %d sparse: %u", it->first.c_str(),
-         zFile->GetFileSize(), zFile->GetWriteLifeTimeHint(), zFile->IsSparse());
+         zFile->GetFileSize(), zFile->GetWriteLifeTimeHint(),
+         zFile->IsSparse());
     for (unsigned int i = 0; i < extents.size(); i++) {
       ZoneExtent* extent = extents[i];
       Info(logger_, "          Extent %u {start=0x%lx, zone=%u, len=%u} ", i,
@@ -377,7 +378,7 @@ IOStatus ZenFS::PersistRecord(std::string record) {
   return s;
 }
 
-IOStatus ZenFS::SyncFileMetadata(ZoneFile *zoneFile) {
+IOStatus ZenFS::SyncFileMetadata(ZoneFile* zoneFile) {
   std::string fileRecord;
   std::string output;
   IOStatus s;
@@ -437,8 +438,7 @@ IOStatus ZenFS::DeleteFile(std::string fname) {
     }
   }
 
-  if (s.ok())
-    s = zbd_->ResetUnusedIOZones();
+  if (s.ok()) s = zbd_->ResetUnusedIOZones();
 
   return s;
 }
@@ -1200,14 +1200,28 @@ std::map<std::string, std::string> ListZenFileSystems() {
   return zenFileSystems;
 }
 
-void ZenFS::GetZoneSnapshot(std::vector<ZoneSnapshot>& zones) {
-  zbd_->GetZoneSnapshot(zones);
-}
-
-void ZenFS::GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files) {
-  std::lock_guard<std::mutex> file_lock(files_mtx_);
-  for (auto& file_it : files_) {
-    zone_files.emplace_back(*file_it.second);
+void ZenFS::GetZenFSSnapshot(ZenFSSnapshot& snapshot,
+                             const ZenFSSnapshotOptions& options) {
+  if (options.zbd_.enabled_) {
+    snapshot.zbd_ = ZBDSnapshot(*zbd_, options);
+    if (options.trigger_report_) {
+      if (options.zbd_.get_free_space_)
+        zbd_->GetMetrics()->ReportGeneral(ZENFS_FREE_SPACE,
+                                          snapshot.zbd_.GetFreeSpace() >> 30);
+      if (options.zbd_.get_used_space_)
+        zbd_->GetMetrics()->ReportGeneral(ZENFS_USED_SPACE,
+                                          snapshot.zbd_.GetUsedSpace() >> 30);
+      if (options.zbd_.get_reclaimable_space_)
+        zbd_->GetMetrics()->ReportGeneral(
+            ZENFS_RECLAIMABLE_SPACE, snapshot.zbd_.GetReclaimableSpace() >> 30);
+    }
+  }
+  if (options.zone_.enabled_) zbd_->GetZoneSnapshot(snapshot.zones_, options);
+  if (options.zone_file_.enabled_) {
+    std::lock_guard<std::mutex> file_lock(files_mtx_);
+    for (auto& file_it : files_) {
+      snapshot.zone_files_.emplace_back(*file_it.second, options);
+    }
   }
 }
 

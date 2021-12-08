@@ -25,13 +25,14 @@
 
 #include "metrics.h"
 #include "rocksdb/env.h"
-#include "rocksdb/io_status.h"
 #include "rocksdb/file_system.h"
+#include "rocksdb/io_status.h"
 
 namespace ROCKSDB_NAMESPACE {
 
 class ZonedBlockDevice;
 class ZoneSnapshot;
+class ZenFSSnapshotOptions;
 
 class Zone {
   ZonedBlockDevice *zbd_;
@@ -120,7 +121,8 @@ class ZonedBlockDevice {
 
   Zone *GetIOZone(uint64_t offset);
 
-  IOStatus AllocateIOZone(Env::WriteLifeTimeHint file_lifetime, IOType io_type, Zone **out_zone);
+  IOStatus AllocateIOZone(Env::WriteLifeTimeHint file_lifetime, IOType io_type,
+                          Zone **out_zone);
   IOStatus AllocateMetaZone(Zone **out_meta_zone);
 
   uint64_t GetFreeSpace();
@@ -153,7 +155,8 @@ class ZonedBlockDevice {
 
   std::shared_ptr<ZenFSMetrics> GetMetrics() { return metrics_; }
 
-  void GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot);
+  void GetZoneSnapshot(std::vector<ZoneSnapshot> &snapshot,
+                       const ZenFSSnapshotOptions &options);
 
  private:
   std::string ErrorToString(int err);
@@ -162,9 +165,9 @@ class ZonedBlockDevice {
   void WaitForOpenIOZoneToken();
   IOStatus ApplyFinishThreshold();
   IOStatus FinishCheapestIOZone();
-  IOStatus GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetime, unsigned int *best_diff_out, Zone **zone_out);
+  IOStatus GetBestOpenZoneMatch(Env::WriteLifeTimeHint file_lifetime,
+                                unsigned int *best_diff_out, Zone **zone_out);
   IOStatus AllocateEmptyZone(Zone **zone_out);
-
 };
 
 }  // namespace ROCKSDB_NAMESPACE

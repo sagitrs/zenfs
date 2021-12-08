@@ -19,8 +19,8 @@ namespace ROCKSDB_NAMESPACE {
 
 #if !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 
-class ZoneSnapshot;
-class ZoneFileSnapshot;
+class ZenFSSnapshot;
+class ZenFSSnapshotOptions;
 
 class Superblock {
   uint32_t magic_ = 0;
@@ -125,7 +125,7 @@ class ZenFS : public FileSystemWrapper {
 
   struct ZenFSMetadataWriter : public MetadataWriter {
     ZenFS* zenFS;
-    IOStatus Persist(ZoneFile *zoneFile) {
+    IOStatus Persist(ZoneFile* zoneFile) {
       Debug(zenFS->GetLogger(), "Syncing metadata for: %s",
             zoneFile->GetFilename().c_str());
       return zenFS->SyncFileMetadata(zoneFile);
@@ -148,8 +148,10 @@ class ZenFS : public FileSystemWrapper {
   IOStatus RollMetaZoneLocked();
   IOStatus PersistSnapshot(ZenMetaLog* meta_writer);
   IOStatus PersistRecord(std::string record);
-  IOStatus SyncFileMetadata(ZoneFile *zoneFile);
-  IOStatus SyncFileMetadata(std::shared_ptr<ZoneFile> zoneFile) { return SyncFileMetadata(zoneFile.get()); }
+  IOStatus SyncFileMetadata(ZoneFile* zoneFile);
+  IOStatus SyncFileMetadata(std::shared_ptr<ZoneFile> zoneFile) {
+    return SyncFileMetadata(zoneFile.get());
+  }
 
   void EncodeSnapshotTo(std::string* output);
   void EncodeFileDeletionTo(std::shared_ptr<ZoneFile> zoneFile,
@@ -358,8 +360,9 @@ class ZenFS : public FileSystemWrapper {
                                 IODebugContext* /*dbg*/) override {
     return IOStatus::NotSupported("AreFilesSame is not supported in ZenFS");
   }
-  void GetZoneSnapshot(std::vector<ZoneSnapshot>& zones);
-  void GetZoneFileSnapshot(std::vector<ZoneFileSnapshot>& zone_files);
+
+  void GetZenFSSnapshot(ZenFSSnapshot& snapshot,
+                        const ZenFSSnapshotOptions& options);
 };
 #endif  // !defined(ROCKSDB_LITE) && defined(OS_LINUX)
 

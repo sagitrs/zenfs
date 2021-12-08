@@ -268,14 +268,13 @@ IOStatus ZoneFile::CloseActiveZone() {
     }
     zbd_->PutOpenIOZoneToken();
     if (full) {
-        zbd_->PutActiveIOZoneToken();
+      zbd_->PutActiveIOZoneToken();
     }
   }
   return s;
 }
 
-void ZoneFile::OpenWR(MetadataWriter *metadata_writer)
-{
+void ZoneFile::OpenWR(MetadataWriter* metadata_writer) {
   open_for_wr_ = true;
   metadata_writer_ = metadata_writer;
 }
@@ -405,21 +404,20 @@ void ZoneFile::PushExtent() {
 }
 
 IOStatus ZoneFile::AllocateNewZone() {
-    Zone *zone;
-    IOStatus s = zbd_->AllocateIOZone(lifetime_, io_type_, &zone);
+  Zone* zone;
+  IOStatus s = zbd_->AllocateIOZone(lifetime_, io_type_, &zone);
 
-    if (!s.ok())
-      return s;
-    if (!zone) {
-      return IOStatus::NoSpace("Zone allocation failure\n");
-    }
-    SetActiveZone(zone);
-    extent_start_ = active_zone_->wp_;
-    extent_filepos_ = fileSize;
+  if (!s.ok()) return s;
+  if (!zone) {
+    return IOStatus::NoSpace("Zone allocation failure\n");
+  }
+  SetActiveZone(zone);
+  extent_start_ = active_zone_->wp_;
+  extent_filepos_ = fileSize;
 
-    /* Persist metadata so we can recover the active extent using
-       the zone write pointer in case there is a crash before syncing */
-    return PersistMetadata();
+  /* Persist metadata so we can recover the active extent using
+     the zone write pointer in case there is a crash before syncing */
+  return PersistMetadata();
 }
 
 /* Byte-aligned, sparse writes with inline metadata
@@ -432,8 +430,7 @@ IOStatus ZoneFile::SparseAppend(char* sparse_buffer, uint32_t data_size) {
 
   if (active_zone_ == NULL) {
     s = AllocateNewZone();
-    if (!s.ok())
-      return s;
+    if (!s.ok()) return s;
   }
 
   while (left) {
@@ -454,8 +451,9 @@ IOStatus ZoneFile::SparseAppend(char* sparse_buffer, uint32_t data_size) {
     s = active_zone_->Append(sparse_buffer, wr_size + pad_sz);
     if (!s.ok()) return s;
 
-    extents_.push_back(new ZoneExtent(extent_start_ + ZoneFile::SPARSE_HEADER_SIZE,
-                                      extent_length, active_zone_));
+    extents_.push_back(
+        new ZoneExtent(extent_start_ + ZoneFile::SPARSE_HEADER_SIZE,
+                       extent_length, active_zone_));
 
     extent_start_ = active_zone_->wp_;
     active_zone_->used_capacity_ += extent_length;
@@ -468,11 +466,11 @@ IOStatus ZoneFile::SparseAppend(char* sparse_buffer, uint32_t data_size) {
         return s;
       }
       if (left) {
-        memcpy((void *)(sparse_buffer + ZoneFile::SPARSE_HEADER_SIZE), (void *)(sparse_buffer + wr_size), left);
+        memcpy((void*)(sparse_buffer + ZoneFile::SPARSE_HEADER_SIZE),
+               (void*)(sparse_buffer + wr_size), left);
       }
       s = AllocateNewZone();
-      if (!s.ok())
-        return s;
+      if (!s.ok()) return s;
     }
   }
 
@@ -487,8 +485,7 @@ IOStatus ZoneFile::Append(void* data, int data_size) {
 
   if (!active_zone_) {
     s = AllocateNewZone();
-    if (!s.ok())
-      return s;
+    if (!s.ok()) return s;
   }
 
   while (left) {
@@ -501,8 +498,7 @@ IOStatus ZoneFile::Append(void* data, int data_size) {
       }
 
       s = AllocateNewZone();
-      if (!s.ok())
-        return s;
+      if (!s.ok()) return s;
     }
 
     wr_size = left;
@@ -519,7 +515,8 @@ IOStatus ZoneFile::Append(void* data, int data_size) {
   return IOStatus::OK();
 }
 
-IOStatus ZoneFile::RecoverSparseExtents(uint64_t start, uint64_t end, Zone *zone) {
+IOStatus ZoneFile::RecoverSparseExtents(uint64_t start, uint64_t end,
+                                        Zone* zone) {
   /* Sparse writes, we need to recover each individual segment */
   IOStatus s;
   uint32_t block_sz = GetBlockSize();
@@ -531,35 +528,35 @@ IOStatus ZoneFile::RecoverSparseExtents(uint64_t start, uint64_t end, Zone *zone
 
   ret = posix_memalign((void**)&buffer, sysconf(_SC_PAGESIZE), block_sz);
   if (ret) {
-    fprintf(stderr,"    Unexpected out of memory error while recovering");
+    fprintf(stderr, "    Unexpected out of memory error while recovering");
     return IOStatus::IOError("TBD");
   }
 
   while (next_extent_start < end) {
-     uint64_t extent_length;
+    uint64_t extent_length;
 
-     ret = pread(f, (void *)buffer, block_sz, next_extent_start);
-     if (ret != (int)block_sz) {
-       fprintf(stderr,"    Unexpected read error while recovering\n");
-       s = IOStatus::IOError("Read error");
-       break;
-     }
+    ret = pread(f, (void*)buffer, block_sz, next_extent_start);
+    if (ret != (int)block_sz) {
+      fprintf(stderr, "    Unexpected read error while recovering\n");
+      s = IOStatus::IOError("Read error");
+      break;
+    }
 
-     extent_length = DecodeFixed64(buffer);
-     //fprintf(stderr, "    Found extent of length: %lu \n", extent_length);
-     if (extent_length == 0) {
-       fprintf(stderr,"    Unexpected extent length = 0\n");
-       s = IOStatus::IOError("");
-       break;
-     }
-     recovered_segments++;
+    extent_length = DecodeFixed64(buffer);
+    // fprintf(stderr, "    Found extent of length: %lu \n", extent_length);
+    if (extent_length == 0) {
+      fprintf(stderr, "    Unexpected extent length = 0\n");
+      s = IOStatus::IOError("");
+      break;
+    }
+    recovered_segments++;
 
-     zone->used_capacity_ += extent_length;
-     extents_.push_back(new ZoneExtent(next_extent_start + SPARSE_HEADER_SIZE,
+    zone->used_capacity_ += extent_length;
+    extents_.push_back(new ZoneExtent(next_extent_start + SPARSE_HEADER_SIZE,
                                       extent_length, zone));
 
-     uint64_t extent_blocks = 1 + extent_length / block_sz;
-     next_extent_start += extent_blocks * block_sz;
+    uint64_t extent_blocks = 1 + extent_length / block_sz;
+    next_extent_start += extent_blocks * block_sz;
   }
 
   fprintf(stderr, "    Recovered %d segments\n", recovered_segments);
@@ -571,47 +568,49 @@ IOStatus ZoneFile::RecoverSparseExtents(uint64_t start, uint64_t end, Zone *zone
 IOStatus ZoneFile::Recover() {
   /* If there is no active extent, the file was either closed gracefully
      or there were no writes prior to a crash. All good.*/
-  if (!HasActiveExtent())
-    return IOStatus::OK();
+  if (!HasActiveExtent()) return IOStatus::OK();
 
   /* Figure out which zone we were writing to */
-  Zone *zone = zbd_->GetIOZone(extent_start_);
+  Zone* zone = zbd_->GetIOZone(extent_start_);
 
   if (zone == nullptr) {
-    fprintf(stderr, "  Could not find zone for extent start : 0x%lx\n", extent_start_);
+    fprintf(stderr, "  Could not find zone for extent start : 0x%lx\n",
+            extent_start_);
     return IOStatus::IOError("");
   }
 
   if (zone->wp_ < extent_start_) {
-    fprintf(stderr, "  Unexpected error: Zone wp bigger that active extent start\n");
+    fprintf(stderr,
+            "  Unexpected error: Zone wp bigger that active extent start\n");
     return IOStatus::IOError("TBD");
   }
 
   /* How much data do we need to recover? */
   uint64_t to_recover = zone->wp_ - extent_start_;
 
-  fprintf(stderr, "  Number of bytes to recover: %lu (extent start: %lu active zone wp: %lu)\n", to_recover, extent_start_, zone->wp_);
+  fprintf(stderr,
+          "  Number of bytes to recover: %lu (extent start: %lu active zone "
+          "wp: %lu)\n",
+          to_recover, extent_start_, zone->wp_);
 
   /* Do we actually have any data to recover? */
   if (to_recover == 0) {
-   /* Mark up the file as having no missing extents */
-   extent_start_ = NO_EXTENT;
-   return IOStatus::OK();
+    /* Mark up the file as having no missing extents */
+    extent_start_ = NO_EXTENT;
+    return IOStatus::OK();
   }
 
   /* Is the data sparse or was it writted direct? */
   if (is_sparse_) {
     fprintf(stderr, "  File format is sparse\n");
     IOStatus s = RecoverSparseExtents(extent_start_, zone->wp_, zone);
-    if (!s.ok())
-      return s;
+    if (!s.ok()) return s;
   } else {
     fprintf(stderr, "  File format is not sparse\n");
     /* For non-sparse files, the data is contigous and we can recover directly
        any missing data using the WP */
     zone->used_capacity_ += to_recover;
-    extents_.push_back(new ZoneExtent(extent_start_,
-                                      to_recover, zone));
+    extents_.push_back(new ZoneExtent(extent_start_, to_recover, zone));
   }
 
   /* Mark up the file as having no missing extents */
@@ -661,8 +660,10 @@ ZonedWritableFile::ZonedWritableFile(ZonedBlockDevice* zbd, bool _buffered,
   if (buffered) {
     size_t sparse_buffer_sz;
 
-    sparse_buffer_sz = 1024 * 1024 + block_sz; /* one extra block size for padding */
-    int ret = posix_memalign((void**)&sparse_buffer, sysconf(_SC_PAGESIZE), sparse_buffer_sz);
+    sparse_buffer_sz =
+        1024 * 1024 + block_sz; /* one extra block size for padding */
+    int ret = posix_memalign((void**)&sparse_buffer, sysconf(_SC_PAGESIZE),
+                             sparse_buffer_sz);
 
     if (ret) sparse_buffer = nullptr;
 
@@ -696,7 +697,7 @@ IOStatus ZonedWritableFile::Truncate(uint64_t size,
 }
 
 IOStatus ZonedWritableFile::DataSync() {
-   if (buffered) {
+  if (buffered) {
     IOStatus s;
     buffer_mtx_.lock();
     /* Flushing the buffer will result in a new extent added to the list*/
@@ -719,8 +720,7 @@ IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
   IOStatus s;
 
   s = DataSync();
-  if (!s.ok())
-    return s;
+  if (!s.ok()) return s;
 
   return zoneFile_->PersistMetadata();
 }
@@ -759,8 +759,7 @@ IOStatus ZonedWritableFile::FlushBuffer() {
 
   if (buffer_pos == 0) return IOStatus::OK();
 
-  s = zoneFile_->SparseAppend(sparse_buffer,
-                              buffer_pos);
+  s = zoneFile_->SparseAppend(sparse_buffer, buffer_pos);
   if (!s.ok()) {
     return s;
   }
