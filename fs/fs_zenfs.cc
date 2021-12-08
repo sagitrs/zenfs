@@ -1213,6 +1213,8 @@ void ZenFS::GetZenFSSnapshot(ZenFSSnapshot& snapshot,
       snapshot.zone_files_.emplace_back(*file_it.second, options);
     }
   }
+  if (options.trigger_report_)
+    zbd_->GetMetrics()->ReportSnapshot(snapshot, options);
 }
 
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;

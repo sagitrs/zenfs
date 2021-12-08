@@ -5,6 +5,7 @@
 
 #include "metrics.h"
 #include "port/port.h"
+#include "snapshot.h"
 #include "util/mutexlock.h"
 #include "snapshot.h"
 
