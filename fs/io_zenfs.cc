@@ -816,7 +816,10 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                   ZENFS_WRITE_LATENCY,                         
                                  Env::Default());
   zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_WRITE_QPS, 1);
-  zoneFile_->GetZBDMetrics()->ReportThroughput(ZENFS_WRITE_THROUGHPUT, data.size());
+  zoneFile_->GetZBDMetrics()->ReportThroughput(zoneFile_->GetIOType() == IOType::kWAL ?                   
+                                                 ZENFS_WAL_WRITE_THROUGHPUT : 
+                                                 ZENFS_WRITE_THROUGHPUT, 
+                                               data.size());
 
   if (buffered) {
     buffer_mtx_.lock();
