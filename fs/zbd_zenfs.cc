@@ -468,9 +468,9 @@ unsigned int GetLifeTimeDiff(Env::WriteLifeTimeHint zone_lifetime,
 IOStatus ZonedBlockDevice::AllocateMetaZone(Zone **out_meta_zone) {
   assert(out_meta_zone);
   *out_meta_zone = nullptr;
-  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_META_ALLOC_LATENCY,
+  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_LABEL(META_ALLOC, LATENCY),
                                  Env::Default());
-  metrics_->ReportQPS(ZENFS_META_ALLOC_QPS, 1);
+  metrics_->ReportQPS(ZENFS_LABEL(META_ALLOC, QPS), 1);
 
   for (const auto z : meta_zones) {
     /* If the zone is not used, reset and use it */
@@ -516,9 +516,12 @@ IOStatus ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime,
   IOStatus s;
   bool ok = false;
   (void)ok;
-  ZenFSMetricsLatencyGuard guard(metrics_, ZENFS_IO_ALLOC_NON_WAL_LATENCY,
-                                 Env::Default());
-  metrics_->ReportQPS(ZENFS_IO_ALLOC_QPS, 1);
+  ZenFSMetricsLatencyGuard guard(
+      metrics_,
+      false ? ZENFS_LABEL_DETAILED(IO_ALLOC, WAL, LATENCY)
+            : ZENFS_LABEL_DETAILED(IO_ALLOC, NON_WAL, LATENCY),
+      Env::Default());
+  metrics_->ReportQPS(ZENFS_LABEL(IO_ALLOC, QPS), 1);
 
   *out_zone = nullptr;
 
@@ -677,8 +680,8 @@ IOStatus ZonedBlockDevice::AllocateZone(Env::WriteLifeTimeHint file_lifetime,
 
   *out_zone = allocated_zone;
 
-  metrics_->ReportGeneral(ZENFS_OPEN_ZONES, open_io_zones_);
-  metrics_->ReportGeneral(ZENFS_ACTIVE_ZONES, active_io_zones_);
+  metrics_->ReportGeneral(ZENFS_LABEL(OPEN_ZONES, COUNT), open_io_zones_);
+  metrics_->ReportGeneral(ZENFS_LABEL(ACTIVE_ZONES, COUNT), active_io_zones_);
 
   return IOStatus::OK();
 }
