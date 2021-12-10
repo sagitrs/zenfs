@@ -301,9 +301,9 @@ ZoneExtent* ZoneFile::GetExtent(uint64_t file_offset, uint64_t* dev_offset) {
 
 IOStatus ZoneFile::PositionedRead(uint64_t offset, size_t n, Slice* result,
                                   char* scratch, bool direct) {
-  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(), ZENFS_READ_LATENCY,
+  ZenFSMetricsLatencyGuard guard(zbd_->GetMetrics(), ZENFS_LABEL(READ, LATENCY),
                                  Env::Default());
-  zbd_->GetMetrics()->ReportQPS(ZENFS_READ_QPS, 1);
+  zbd_->GetMetrics()->ReportQPS(ZENFS_LABEL(READ, QPS), 1);
 
   int f = zbd_->GetReadFD();
   int f_direct = zbd_->GetReadDirectFD();
@@ -719,12 +719,13 @@ IOStatus ZonedWritableFile::DataSync() {
 IOStatus ZonedWritableFile::Fsync(const IOOptions& /*options*/,
                                   IODebugContext* /*dbg*/) {
   IOStatus s;
-  ZenFSMetricsLatencyGuard guard(zoneFile_->GetZBDMetrics(), 
-                                 zoneFile_->GetIOType() == IOType::kWAL ?
-                                   ZENFS_WAL_SYNC_LATENCY:
-                                   ZENFS_SYNC_LATENCY,                         
-                                 Env::Default());
-  zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_SYNC_QPS, 1);
+  ZenFSMetricsLatencyGuard guard(
+      zoneFile_->GetZBDMetrics(),
+      zoneFile_->GetIOType() == IOType::kWAL
+          ? ZENFS_LABEL_DETAILED(SYNC, WAL, LATENCY)
+          : ZENFS_LABEL_DETAILED(SYNC, NON_WAL, LATENCY),
+      Env::Default());
+  zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_LABEL(SYNC, QPS), 1);
 
   s = DataSync();
   if (!s.ok()) return s;
@@ -810,15 +811,14 @@ IOStatus ZonedWritableFile::Append(const Slice& data,
                                    const IOOptions& /*options*/,
                                    IODebugContext* /*dbg*/) {
   IOStatus s;
-  ZenFSMetricsLatencyGuard guard(zoneFile_->GetZBDMetrics(), 
-                                 zoneFile_->GetIOType() == IOType::kWAL ?
-                                   ZENFS_WAL_WRITE_LATENCY: 
-                                  ZENFS_WRITE_LATENCY,                         
-                                 Env::Default());
-  zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_WRITE_QPS, 1);
-  zoneFile_->GetZBDMetrics()->ReportThroughput(zoneFile_->GetIOType() == IOType::kWAL ?                   
-                                                 ZENFS_WAL_WRITE_THROUGHPUT : 
-                                                 ZENFS_WRITE_THROUGHPUT, 
+  ZenFSMetricsLatencyGuard guard(
+      zoneFile_->GetZBDMetrics(),
+      zoneFile_->GetIOType() == IOType::kWAL
+          ? ZENFS_LABEL_DETAILED(WRITE, WAL, LATENCY)
+          : ZENFS_LABEL_DETAILED(WRITE, NON_WAL, LATENCY),
+      Env::Default());
+  zoneFile_->GetZBDMetrics()->ReportQPS(ZENFS_LABEL(WRITE, QPS), 1);
+  zoneFile_->GetZBDMetrics()->ReportThroughput(ZENFS_LABEL(WRITE, THROUGHPUT),
                                                data.size());
 
   if (buffered) {
