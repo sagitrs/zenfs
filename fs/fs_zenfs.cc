@@ -1231,6 +1231,10 @@ void ZenFS::GetZenFSSnapshot(ZenFSSnapshot& snapshot,
     zbd_->GetMetrics()->ReportSnapshot(snapshot, options);
 }
 
+void ZenFS::MigrateFile(const std::string& filename, uint64_t zone_id) {
+  // TODO: Migrate a file.
+}
+
 extern "C" FactoryFunc<FileSystem> zenfs_filesystem_reg;
 
 FactoryFunc<FileSystem> zenfs_filesystem_reg =
